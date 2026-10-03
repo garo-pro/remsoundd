@@ -31,7 +31,7 @@ jobs:
         with:
           tool: cargo-deb,cargo-about
       - name: Collect the licenses of everything compiled in
-        run: cargo about generate --locked about.hbs -o target/THIRD-PARTY-LICENSES.md
+        run: mkdir -p target && cargo about generate --locked about.hbs -o target/THIRD-PARTY-LICENSES.md
       - run: cargo test --locked
       - run: cargo deb --locked
       - uses: softprops/action-gh-release@v3

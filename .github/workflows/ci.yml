@@ -68,7 +68,7 @@ jobs:
         with:
           tool: cargo-deb,cargo-about
       - name: Collect the licenses of everything compiled in
-        run: cargo about generate --locked about.hbs -o target/THIRD-PARTY-LICENSES.md
+        run: mkdir -p target && cargo about generate --locked about.hbs -o target/THIRD-PARTY-LICENSES.md
       - run: cargo deb --locked
       - uses: actions/upload-artifact@v7
         with:

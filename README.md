@@ -44,7 +44,7 @@ Build and install a Debian package. The package carries the licenses of everythi
 ```sh
 cargo install cargo-deb
 cargo install cargo-about --locked --features cli
-cargo about generate about.hbs -o target/THIRD-PARTY-LICENSES.md
+mkdir -p target && cargo about generate about.hbs -o target/THIRD-PARTY-LICENSES.md
 cargo deb
 sudo apt install ./target/debian/remsoundd_*.deb
 ```
