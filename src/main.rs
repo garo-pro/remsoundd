@@ -344,17 +344,31 @@ async fn discover(config: Config, seconds: u64) -> anyhow::Result<()> {
     if heard.is_empty() {
         println!("No peers heard. Check that RemSound is running on the PC, and add its address to peers if it is on Tailscale or another network.");
     }
+    // One line per device, however many of its addresses were heard.
+    let mut devices: Vec<(remsoundd::discovery::Announcement, Vec<IpAddr>)> = Vec::new();
     for p in heard {
-        let a = &p.announcement;
+        match devices
+            .iter_mut()
+            .find(|(a, _)| a.instance == p.announcement.instance)
+        {
+            Some((_, addrs)) => addrs.push(p.address),
+            None => devices.push((p.announcement, vec![p.address])),
+        }
+    }
+    for (a, addrs) in devices {
         let roles = match (a.can_send, a.can_receive) {
             (true, true) => "sends and receives audio",
             (true, false) => "sends audio",
             (false, true) => "receives audio",
             (false, false) => "neither sends nor receives",
         };
+        let addrs: Vec<String> = addrs.iter().map(IpAddr::to_string).collect();
         println!(
             "{} at {}, audio port {}, {roles}. Instance {}",
-            a.name, p.address, a.audio_port, a.instance
+            a.name,
+            addrs.join(" and "),
+            a.audio_port,
+            a.instance
         );
     }
     Ok(())

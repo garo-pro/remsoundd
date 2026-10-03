@@ -1,0 +1,20 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+    # The daemon's own user. Its group alone may read /etc/remsoundd/password.
+    if ! getent passwd remsoundd >/dev/null; then
+        adduser --system --group --no-create-home --home /var/lib/remsoundd remsoundd
+    fi
+    # The bridge socket's group: the daemon joins it through SupplementaryGroups, and the
+    # Hermes gateway's user is added to it by hand.
+    if ! getent group remsound >/dev/null; then
+        addgroup --system remsound
+    fi
+    if [ -f /etc/remsoundd/password ]; then
+        chown root:remsoundd /etc/remsoundd/password
+        chmod 640 /etc/remsoundd/password
+    fi
+fi
+
+#DEBHELPER#

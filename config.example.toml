@@ -1,0 +1,40 @@
+# remsoundd configuration. Copy to /etc/remsoundd/config.toml.
+# This file holds no secrets: the password lives in /etc/remsoundd/password.
+
+# The name other RemSounds show for this machine. Defaults to the host name.
+# name = "hermes-box"
+
+# The RemSound profile password must match the one on the PC. It is read from
+# /etc/remsoundd/password (mode 640, owner root, group remsoundd), so leave both of these commented out
+# unless you keep it somewhere else.
+# password_file = "/etc/remsoundd/password"
+# password = "only for quick tests"
+
+# The PCs to connect to, by IP address or host name, with an optional port (default 47830).
+# Over Tailscale use the PC's Tailscale address or MagicDNS name.
+peers = ["100.64.0.5"]
+
+# Whose microphone goes to the bridge. Defaults to the first peer above that is sending audio.
+# mic_from = "100.64.0.5"
+
+# audio_port = 47830
+# discovery_port = 47821
+# Announce this machine on the LAN and to the peers above, so it shows up in RemSound's list.
+# discovery = true
+
+# log_level = "info"   # or "debug" for every packet-level decision
+
+[bridge]
+# socket = "/run/remsoundd/bridge.sock"
+# The socket is mode 0660; this group may connect. Add the Hermes gateway's user to it.
+group = "remsound"
+
+[send]
+# "continuous" keeps one Opus stream running while a peer is connected, silent between
+# utterances: no start-up delay and nothing for the PC to tear down. "burst" sends only speech.
+# mode = "continuous"
+# bitrate = 96000
+
+[receive]
+# How long a missing packet is waited for before it is concealed, in milliseconds.
+# jitter_ms = 60

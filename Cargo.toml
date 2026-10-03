@@ -30,7 +30,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.29", features = ["user", "fs"] }
+nix = { version = "0.29", features = ["user", "fs", "hostname"] }
 sd-notify = "0.4"
 
 [dev-dependencies]
@@ -50,9 +50,10 @@ remsoundd speaks the RemSound protocol as a full-duplex, headless peer. \
 It receives a Windows PC's microphone and hands it to a local client over a \
 Unix socket, and streams that client's audio back to the PC."""
 maintainer-scripts = "debian/"
+# Installed but not enabled: it cannot start until the password and peers are set.
+systemd-units = { unit-scripts = "systemd/", enable = false, start = false }
 assets = [
     ["target/release/remsoundd", "usr/bin/", "755"],
-    ["systemd/remsoundd.service", "lib/systemd/system/", "644"],
     ["config.example.toml", "etc/remsoundd/config.toml", "644"],
     ["README.md", "usr/share/doc/remsoundd/README.md", "644"],
     ["docs/BRIDGE.md", "usr/share/doc/remsoundd/BRIDGE.md", "644"],

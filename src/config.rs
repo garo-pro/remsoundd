@@ -9,6 +9,8 @@ use serde::Deserialize;
 use crate::protocol::{DEFAULT_AUDIO_PORT, DEFAULT_DISCOVERY_PORT};
 
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/remsoundd/config.toml";
+/// Read when nothing else names a password; the service gets the same file as a credential.
+pub const DEFAULT_PASSWORD_FILE: &str = "/etc/remsoundd/password";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -219,8 +221,9 @@ impl Config {
 
     /// The password, and a plain-words description of where it came from (never the password itself).
     ///
-    /// Order: `password` in the config, `password_file`, then a systemd credential named "password"
-    /// (`LoadCredential=password:...`). An empty password is refused: RemSound sends no audio without one.
+    /// Order: `password` in the config, `password_file`, a systemd credential named "password"
+    /// (`LoadCredential=password:...`), then `/etc/remsoundd/password`. An empty password is
+    /// refused: RemSound sends no audio without one.
     pub fn resolve_password(&self) -> anyhow::Result<(String, String)> {
         let (raw, source) = if let Some(p) = &self.password {
             (p.clone(), "the config file".to_string())
@@ -234,8 +237,13 @@ impl Config {
                 format!("cannot read the systemd credential {}", path.display())
             })?;
             (text, "the systemd credential \"password\"".to_string())
+        } else if Path::new(DEFAULT_PASSWORD_FILE).exists() {
+            let text = std::fs::read_to_string(DEFAULT_PASSWORD_FILE).with_context(|| {
+                format!("cannot read {DEFAULT_PASSWORD_FILE}; run this as root")
+            })?;
+            (text, format!("the password file {DEFAULT_PASSWORD_FILE}"))
         } else {
-            bail!("no password is set: add password_file to the config, or load a systemd credential called password");
+            bail!("no password is set: write it to {DEFAULT_PASSWORD_FILE}, or set password_file in the config");
         };
         // A file usually ends with a newline that is not part of the password.
         let password = raw
@@ -253,11 +261,17 @@ impl Config {
 }
 
 pub fn hostname() -> String {
-    std::fs::read_to_string("/proc/sys/kernel/hostname")
+    #[cfg(unix)]
+    if let Some(name) = nix::unistd::gethostname()
         .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| std::env::var("HOSTNAME").ok())
+        .and_then(|h| h.into_string().ok())
+        .filter(|h| !h.is_empty())
+    {
+        return name;
+    }
+    std::env::var("HOSTNAME")
+        .ok()
+        .filter(|h| !h.is_empty())
         .unwrap_or_else(|| "remsoundd".into())
 }
 
