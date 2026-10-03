@@ -213,11 +213,8 @@ async fn tts_from_one_daemon_arrives_as_mic_at_the_other() {
     );
     assert!(
         timeout(Duration::from_secs(2), async {
-            loop {
-                if read_frame(&mut ca.stream).await.unwrap().is_none() {
-                    break;
-                }
-            }
+            // A clean end of stream or a reset: either way the daemon has let go of it.
+            while let Ok(Some(_)) = read_frame(&mut ca.stream).await {}
         })
         .await
         .is_ok(),

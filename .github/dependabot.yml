@@ -6,6 +6,9 @@ updates:
       interval: weekly
     open-pull-requests-limit: 10
     groups:
+      # The RustCrypto crates share trait crates and only upgrade together.
+      rustcrypto:
+        patterns: [aes-gcm, pbkdf2, sha2, subtle]
       # Patch and minor bumps arrive as one pull request a week; majors stay separate.
       cargo-minor:
         update-types: [minor, patch]
