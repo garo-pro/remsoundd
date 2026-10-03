@@ -40,6 +40,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(5);
 const RESOLVE_INTERVAL: Duration = Duration::from_secs(10);
 const RESOLVE_REFRESH: Duration = Duration::from_secs(60);
 const EVENT_QUEUE: usize = 4096;
+const MAX_SESSIONS: usize = 16;
 
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
@@ -303,7 +304,7 @@ impl Engine {
             sessions: HashMap::new(),
             security: HashMap::new(),
             clock: Instant::now(),
-            recent_pings: [i64::MIN; 16],
+            recent_pings: [-1; 16],
             ping_slot: 0,
             control_seq: 0,
             stream_id: new_stream_id(),
@@ -456,30 +457,36 @@ impl Engine {
             self.counters.malformed += 1;
             return;
         };
-        if let Err(why) = format.check_usable() {
-            if self.throttle.allow(
-                format!("badformat-{}", from.ip()),
-                Duration::from_secs(5),
-                now,
-            ) {
-                warn!(
-                    "{} announced a stream this daemon cannot play: {why}",
-                    self.who(from.ip())
-                );
-            }
-            return;
-        }
         if !self.allowed(from.ip()) {
             self.counters.not_allowed += 1;
             if self.throttle.allow(
                 format!("notallowed-{}", from.ip()),
                 Duration::from_secs(60),
                 now,
-            ) {
+            ) && self
+                .throttle
+                .allow("notallowed-any", Duration::from_secs(1), now)
+            {
                 info!(
                     "{} is sending audio to this daemon but is not in its peers list, so it is ignored. Add {} to peers in the config to accept it",
                     self.who(from.ip()),
                     from.ip()
+                );
+            }
+            return;
+        }
+        if let Err(why) = format.check_usable() {
+            if self.throttle.allow(
+                format!("badformat-{}", from.ip()),
+                Duration::from_secs(5),
+                now,
+            ) && self
+                .throttle
+                .allow("badformat-any", Duration::from_secs(1), now)
+            {
+                warn!(
+                    "{} announced a stream this daemon cannot play: {why}",
+                    self.who(from.ip())
                 );
             }
             return;
@@ -495,6 +502,16 @@ impl Engine {
         match ReceiveSession::new(format.clone(), self.config.jitter, now) {
             Ok(session) => {
                 let changed = self.sessions.insert(key, session).is_some();
+                // A peer never needs many streams at once; keep a bound on what it can make us hold.
+                while self.sessions.len() > MAX_SESSIONS {
+                    let idlest = *self
+                        .sessions
+                        .iter()
+                        .max_by_key(|(_, s)| s.idle_for(now))
+                        .unwrap()
+                        .0;
+                    self.sessions.remove(&idlest);
+                }
                 // A sender picks a new stream id on restart or codec change: retire its older streams on the same lane.
                 let superseded: Vec<_> = self
                     .sessions
@@ -604,10 +621,12 @@ impl Engine {
             }
             HeartbeatKind::Pong => {
                 // Only a pong answering one of our own recent pings counts.
-                if !self.recent_pings.contains(&stamp) {
+                if stamp < 0 || !self.recent_pings.contains(&stamp) {
                     return;
                 }
-                let rtt = (self.clock.elapsed().as_millis() as i64 - stamp).max(0) as u32;
+                let rtt = (self.clock.elapsed().as_millis() as i64)
+                    .saturating_sub(stamp)
+                    .clamp(0, u32::MAX as i64) as u32;
                 let Some(i) = self.peer_index(from.ip()) else {
                     return;
                 };

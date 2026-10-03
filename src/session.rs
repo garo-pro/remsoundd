@@ -42,6 +42,8 @@ enum Kind {
         reorder: ReorderBuffer<Vec<u8>>,
         /// Samples per channel of the last decoded packet, at 48 kHz: the size to conceal a loss with.
         last_frame: usize,
+        /// Decode buffer, kept so the 5 ms poll does not allocate.
+        scratch: Vec<f32>,
     },
     Pcm {
         partial: HashMap<u32, PartialFrame>,
@@ -70,6 +72,7 @@ impl ReceiveSession {
                 last_frame: (format.frame_samples_per_channel as usize * WIRE_RATE as usize
                     / format.sample_rate as usize)
                     .max(120),
+                scratch: vec![0f32; MAX_OPUS_FRAME * 2],
             },
             Some(Codec::Pcm) => Kind::Pcm {
                 partial: HashMap::new(),
@@ -154,14 +157,15 @@ impl ReceiveSession {
                 decoder,
                 reorder,
                 last_frame,
+                scratch,
             } => {
                 let released = reorder.pop(now);
-                let mut buf = vec![0f32; MAX_OPUS_FRAME * 2];
+                let buf = scratch.as_mut_slice();
                 let mut iter = released.into_iter().peekable();
                 while let Some(r) = iter.next() {
                     match r {
                         Released::Item(_, packet) => {
-                            match decoder.decode_float(&packet, &mut buf, false) {
+                            match decoder.decode_float(&packet, buf, false) {
                                 Ok(n) => {
                                     *last_frame = n;
                                     out.extend_from_slice(&buf[..n * 2]);

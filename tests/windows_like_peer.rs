@@ -28,14 +28,21 @@ fn seal(key: &[u8; 32], counter: u64, plain: &[u8]) -> Vec<u8> {
     let mut nonce = [0xA5u8; 12];
     nonce[6..].copy_from_slice(&counter.to_le_bytes()[..6]);
     let mut body = plain.to_vec();
-    let tag = Aes256Gcm::new(key.into()).encrypt_in_place_detached(Nonce::from_slice(&nonce), &[], &mut body).unwrap();
+    let tag = Aes256Gcm::new(key.into())
+        .encrypt_in_place_detached(Nonce::from_slice(&nonce), &[], &mut body)
+        .unwrap();
     [nonce.to_vec(), tag.to_vec(), body].concat()
 }
 
 fn open(key: &[u8; 32], sealed: &[u8]) -> Option<Vec<u8>> {
     let mut body = sealed.get(28..)?.to_vec();
     Aes256Gcm::new(key.into())
-        .decrypt_in_place_detached(Nonce::from_slice(&sealed[..12]), &[], &mut body, Tag::from_slice(&sealed[12..28]))
+        .decrypt_in_place_detached(
+            Nonce::from_slice(&sealed[..12]),
+            &[],
+            &mut body,
+            Tag::from_slice(&sealed[12..28]),
+        )
         .ok()?;
     Some(body)
 }
@@ -60,7 +67,11 @@ async fn talks_to_a_windows_like_peer() {
     let listener = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let sender = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let pc_port = listener.local_addr().unwrap().port();
-    let daemon_port = std::net::UdpSocket::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let daemon_port = std::net::UdpSocket::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
     let daemon_addr = SocketAddr::from((Ipv4Addr::LOCALHOST, daemon_port));
 
     let mut daemon = engine::start(EngineConfig {
@@ -85,22 +96,36 @@ async fn talks_to_a_windows_like_peer() {
     ping.extend_from_slice(&123_456i64.to_le_bytes());
     sender.send_to(&ping, daemon_addr).await.unwrap();
     let mut buf = [0u8; 2048];
-    let (n, _) = timeout(Duration::from_secs(2), sender.recv_from(&mut buf)).await.expect("no pong").unwrap();
+    let (n, _) = timeout(Duration::from_secs(2), sender.recv_from(&mut buf))
+        .await
+        .expect("no pong")
+        .unwrap();
     assert_eq!(&buf[..6], &[0x52, 0x4D, 0x4E, 0x44, 1, 4]);
     assert_eq!(&buf[6..8], &[0xFF, 0xFF], "heartbeats use stream 0xFFFF");
     assert_eq!(buf[12], 1, "a pong");
-    assert_eq!(i64::from_le_bytes(buf[13..21].try_into().unwrap()), 123_456, "the stamp is echoed verbatim");
+    assert_eq!(
+        i64::from_le_bytes(buf[13..21].try_into().unwrap()),
+        123_456,
+        "the stamp is echoed verbatim"
+    );
     assert_eq!(n, 21, "a 9-byte heartbeat payload, no flags byte");
 
     // 2. The daemon pings the PC's listener; the PC answers from its ephemeral port. That must count.
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
-        let (n, from) = timeout(deadline - Instant::now(), listener.recv_from(&mut buf)).await.expect("no ping").unwrap();
-        assert_eq!(from, daemon_addr, "the daemon sends from its bound audio port");
+        let (n, from) = timeout(deadline - Instant::now(), listener.recv_from(&mut buf))
+            .await
+            .expect("no ping")
+            .unwrap();
+        assert_eq!(
+            from, daemon_addr,
+            "the daemon sends from its bound audio port"
+        );
         if buf[5] == 11 {
             // A tick proof, if one comes first: 12 + 53 bytes, version 1, our time, a GUID.
             assert_eq!(n, 65);
-            let plain = open(&key, &buf[12..n]).expect("the tick proof must open with the shared key");
+            let plain =
+                open(&key, &buf[12..n]).expect("the tick proof must open with the shared key");
             assert_eq!(plain[0], 1);
         }
         if buf[5] == 4 && buf[12] == 0 {
@@ -129,34 +154,53 @@ async fn talks_to_a_windows_like_peer() {
     let mut stream_id = None;
     let deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < deadline && decoded < 48_000 / 2 {
-        let Ok(Ok((n, _))) = timeout(deadline - Instant::now(), listener.recv_from(&mut buf)).await else { break };
+        let Ok(Ok((n, _))) = timeout(deadline - Instant::now(), listener.recv_from(&mut buf)).await
+        else {
+            break;
+        };
         let stream = u16::from_le_bytes([buf[6], buf[7]]);
         match buf[5] {
             1 => {
                 let p = &buf[12..n];
-                assert_eq!(p.len(), 46, "with a fingerprint the format payload is 46 bytes");
+                assert_eq!(
+                    p.len(),
+                    46,
+                    "with a fingerprint the format payload is 46 bytes"
+                );
                 let i = |at: usize| i32::from_le_bytes(p[at..at + 4].try_into().unwrap());
                 assert_eq!((i(0), i(4), i(24), i(28)), (48000, 2, 2, 960));
-                assert_eq!((p[32], p[33]), (0, 0), "lane Mixed, labFlags 0: never ask for custom Opus");
+                assert_eq!(
+                    (p[32], p[33]),
+                    (0, 0),
+                    "lane Mixed, labFlags 0: never ask for custom Opus"
+                );
                 assert_eq!(&p[36..44], &creds.fingerprint);
                 format_seen = true;
                 stream_id = Some(stream);
             }
             2 => {
-                assert!(format_seen, "a Format packet must come before the first audio packet");
+                assert!(
+                    format_seen,
+                    "a Format packet must come before the first audio packet"
+                );
                 assert_eq!(Some(stream), stream_id);
-                let opus_packet = open(&key, &buf[12..n]).expect("audio must open with the shared key");
+                let opus_packet =
+                    open(&key, &buf[12..n]).expect("audio must open with the shared key");
                 let mut pcm = vec![0f32; 5760 * 2];
                 decoded += decoder.decode_float(&opus_packet, &mut pcm, false).unwrap();
             }
             _ => {}
         }
     }
-    assert!(decoded >= 48_000 / 2, "the daemon must stream continuously to a connected PC ({decoded} samples)");
+    assert!(
+        decoded >= 48_000 / 2,
+        "the daemon must stream continuously to a connected PC ({decoded} samples)"
+    );
 
     // 4. The PC sends its microphone: 2.5 ms Opus frames, 400 a second, a fresh random stream id.
     //    One packet in fifty is lost and pairs are swapped now and then, as on Wi-Fi.
-    let mut enc = opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::LowDelay).unwrap();
+    let mut enc =
+        opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::LowDelay).unwrap();
     enc.set_bitrate(opus::Bitrate::Bits(192_000)).unwrap();
     enc.set_inband_fec(true).unwrap();
     enc.set_packet_loss_perc(10).unwrap();
@@ -201,12 +245,21 @@ async fn talks_to_a_windows_like_peer() {
         }
     })
     .await;
-    let start = mono.iter().position(|s| s.abs() > 0.05).expect("no microphone audio arrived");
+    let start = mono
+        .iter()
+        .position(|s| s.abs() > 0.05)
+        .expect("no microphone audio arrived");
     let end = mono.iter().rposition(|s| s.abs() > 0.05).unwrap();
     let tone = &mono[start..=end];
     let secs = tone.len() as f32 / 48_000.0;
-    assert!((0.98..1.02).contains(&secs), "one second sent, {secs:.3} s received: lost packets must be concealed, not skipped");
-    let crossings = tone.windows(2).filter(|w| (w[0] < 0.0) != (w[1] < 0.0)).count() as f32;
+    assert!(
+        (0.98..1.02).contains(&secs),
+        "one second sent, {secs:.3} s received: lost packets must be concealed, not skipped"
+    );
+    let crossings = tone
+        .windows(2)
+        .filter(|w| (w[0] < 0.0) != (w[1] < 0.0))
+        .count() as f32;
     let hz = crossings / 2.0 / secs;
     assert!((hz - 700.0).abs() < 10.0, "{hz:.0} Hz received, 700 sent");
 
