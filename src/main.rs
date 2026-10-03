@@ -18,7 +18,11 @@ use remsoundd::identity;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Parser)]
-#[command(name = "remsoundd", version, about = "A headless RemSound peer for Linux")]
+#[command(
+    name = "remsoundd",
+    version,
+    about = "A headless RemSound peer for Linux"
+)]
 struct Cli {
     /// Path to the config file.
     #[arg(long, global = true, default_value = DEFAULT_CONFIG_PATH)]
@@ -59,7 +63,11 @@ fn init_logging(level: &str) {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level));
     // Plain lines, no colour codes, no module paths: read through journald with a screen reader.
     // journald adds its own timestamps, so ours are left out there.
-    let builder = tracing_subscriber::fmt().with_env_filter(filter).with_ansi(false).with_target(false);
+    let builder = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .with_ansi(false)
+        .with_target(false);
     if std::env::var_os("JOURNAL_STREAM").is_some() {
         builder.without_time().init();
     } else {
@@ -105,11 +113,18 @@ struct Link {
 
 async fn start_link(config: &Config) -> anyhow::Result<Link> {
     let (password, source) = config.resolve_password()?;
-    let credentials = tokio::task::spawn_blocking(move || Credentials::from_password(&password)).await?;
-    info!("password read from {source}; its fingerprint is {}", hex(&credentials.fingerprint));
+    let credentials =
+        tokio::task::spawn_blocking(move || Credentials::from_password(&password)).await?;
+    info!(
+        "password read from {source}; its fingerprint is {}",
+        hex(&credentials.fingerprint)
+    );
     let (instance, created) = identity::load_or_create(&config.state_dir)?;
     if created {
-        info!("created a new instance id {instance} in {}", config.state_dir.display());
+        info!(
+            "created a new instance id {instance} in {}",
+            config.state_dir.display()
+        );
     }
     let name = config.display_name();
     let peers = config.peer_specs()?;
@@ -231,7 +246,8 @@ async fn check(path: &Path) -> anyhow::Result<()> {
     let (password, source) = config.resolve_password()?;
     println!("Password read from {source}.");
     let started = Instant::now();
-    let credentials = tokio::task::spawn_blocking(move || Credentials::from_password(&password)).await?;
+    let credentials =
+        tokio::task::spawn_blocking(move || Credentials::from_password(&password)).await?;
     println!(
         "Key derived in {} ms. Password fingerprint: {}",
         started.elapsed().as_millis(),
@@ -241,11 +257,26 @@ async fn check(path: &Path) -> anyhow::Result<()> {
     match std::fs::read_to_string(&id_path) {
         Ok(text) => match Uuid::parse_str(text.trim()) {
             Ok(id) => println!("Instance id: {id}"),
-            Err(_) => println!("Problem: {} does not hold a valid instance id.", id_path.display()),
+            Err(_) => println!(
+                "Problem: {} does not hold a valid instance id.",
+                id_path.display()
+            ),
         },
-        Err(_) => println!("No instance id yet; one is created in {} on first run.", config.state_dir.display()),
+        Err(_) => println!(
+            "No instance id yet; one is created in {} on first run.",
+            config.state_dir.display()
+        ),
     }
-    println!("Audio port {}, discovery port {} ({}).", config.audio_port, config.discovery_port, if config.discovery { "discovery on" } else { "discovery off" });
+    println!(
+        "Audio port {}, discovery port {} ({}).",
+        config.audio_port,
+        config.discovery_port,
+        if config.discovery {
+            "discovery on"
+        } else {
+            "discovery off"
+        }
+    );
     let peers = config.peer_specs()?;
     if peers.is_empty() {
         println!("Problem: no peers are configured. Add your PC's address to peers.");
@@ -280,7 +311,9 @@ async fn check(path: &Path) -> anyhow::Result<()> {
 }
 
 async fn discover(config: Config, seconds: u64) -> anyhow::Result<()> {
-    let instance = identity::load_or_create(&config.state_dir).map(|(id, _)| id).unwrap_or_else(|_| Uuid::new_v4());
+    let instance = identity::load_or_create(&config.state_dir)
+        .map(|(id, _)| id)
+        .unwrap_or_else(|_| Uuid::new_v4());
     let table: SharedPeerTable = Arc::new(Mutex::new(PeerTable::default()));
     // Announce to the configured peers too: over Tailscale a PC only answers someone it has heard.
     let mut targets = Vec::new();
@@ -319,7 +352,10 @@ async fn discover(config: Config, seconds: u64) -> anyhow::Result<()> {
             (false, true) => "receives audio",
             (false, false) => "neither sends nor receives",
         };
-        println!("{} at {}, audio port {}, {roles}. Instance {}", a.name, p.address, a.audio_port, a.instance);
+        println!(
+            "{} at {}, audio port {}, {roles}. Instance {}",
+            a.name, p.address, a.audio_port, a.instance
+        );
     }
     Ok(())
 }
@@ -354,13 +390,23 @@ async fn loopback_test(config: Config, delay_ms: u64) -> anyhow::Result<()> {
 }
 
 async fn record(config: Config, file: &Path, seconds: Option<u64>) -> anyhow::Result<()> {
-    let spec = hound::WavSpec { channels: 2, sample_rate: 48_000, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
-    let mut writer = hound::WavWriter::create(file, spec).with_context(|| format!("cannot create {}", file.display()))?;
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: 48_000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(file, spec)
+        .with_context(|| format!("cannot create {}", file.display()))?;
     let mut link = start_link(&config).await?;
-    println!("Recording incoming microphone audio to {}. {}", file.display(), match seconds {
-        Some(s) => format!("Stopping after {s} seconds."),
-        None => "Press Ctrl+C to stop.".into(),
-    });
+    println!(
+        "Recording incoming microphone audio to {}. {}",
+        file.display(),
+        match seconds {
+            Some(s) => format!("Stopping after {s} seconds."),
+            None => "Press Ctrl+C to stop.".into(),
+        }
+    );
     let deadline = seconds.map(|s| tokio::time::Instant::now() + Duration::from_secs(s));
     let mut frames = 0u64;
     loop {
@@ -389,6 +435,10 @@ async fn record(config: Config, file: &Path, seconds: Option<u64>) -> anyhow::Re
     }
     link.stop().await;
     writer.finalize()?;
-    println!("Saved {:.1} seconds of audio to {}.", frames as f64 / 48_000.0, file.display());
+    println!(
+        "Saved {:.1} seconds of audio to {}.",
+        frames as f64 / 48_000.0,
+        file.display()
+    );
     Ok(())
 }

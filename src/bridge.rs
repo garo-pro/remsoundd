@@ -53,7 +53,9 @@ pub fn frame(kind: u8, payload: &[u8]) -> Vec<u8> {
 }
 
 /// Read one frame. Ok(None) at a clean end of stream.
-pub async fn read_frame<R: AsyncReadExt + Unpin>(reader: &mut R) -> std::io::Result<Option<(u8, Vec<u8>)>> {
+pub async fn read_frame<R: AsyncReadExt + Unpin>(
+    reader: &mut R,
+) -> std::io::Result<Option<(u8, Vec<u8>)>> {
     let mut head = [0u8; 5];
     match reader.read_exact(&mut head[..1]).await {
         Ok(_) => {}
@@ -63,7 +65,10 @@ pub async fn read_frame<R: AsyncReadExt + Unpin>(reader: &mut R) -> std::io::Res
     reader.read_exact(&mut head[1..]).await?;
     let len = u32::from_le_bytes(head[1..5].try_into().unwrap());
     if len > MAX_FRAME_BYTES {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("a frame of {len} bytes is too large")));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("a frame of {len} bytes is too large"),
+        ));
     }
     let mut payload = vec![0u8; len as usize];
     reader.read_exact(&mut payload).await?;
@@ -104,20 +109,30 @@ pub struct BridgeSettings {
 pub fn bind(settings: &BridgeSettings) -> anyhow::Result<UnixListener> {
     let path = &settings.path;
     if let Ok(meta) = std::fs::symlink_metadata(path) {
-        anyhow::ensure!(meta.file_type().is_socket(), "{} exists and is not a socket; refusing to replace it", path.display());
-        std::fs::remove_file(path).with_context(|| format!("cannot remove the old socket {}", path.display()))?;
+        anyhow::ensure!(
+            meta.file_type().is_socket(),
+            "{} exists and is not a socket; refusing to replace it",
+            path.display()
+        );
+        std::fs::remove_file(path)
+            .with_context(|| format!("cannot remove the old socket {}", path.display()))?;
     }
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| format!("cannot create {}", parent.display()))?;
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("cannot create {}", parent.display()))?;
     }
-    let listener = UnixListener::bind(path).with_context(|| format!("cannot create the bridge socket {}", path.display()))?;
+    let listener = UnixListener::bind(path)
+        .with_context(|| format!("cannot create the bridge socket {}", path.display()))?;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o660))?;
     if let Some(group) = &settings.group {
         let gid = nix::unistd::Group::from_name(group)?
             .with_context(|| format!("the bridge group {group:?} does not exist; create it, or remove group from [bridge] in the config"))?
             .gid;
-        nix::unistd::chown(path, None, Some(gid))
-            .with_context(|| format!("cannot give the bridge socket to group {group}; is this daemon a member of it?"))?;
+        nix::unistd::chown(path, None, Some(gid)).with_context(|| {
+            format!(
+                "cannot give the bridge socket to group {group}; is this daemon a member of it?"
+            )
+        })?;
     }
     Ok(listener)
 }
@@ -130,6 +145,7 @@ enum Incoming {
 struct Client {
     id: u64,
     tx: mpsc::Sender<Vec<u8>>,
+    reader: tokio::task::JoinHandle<()>,
     /// Utterance ids this client queued and has not yet been told are done.
     open_ids: HashSet<String>,
     name: String,
@@ -168,14 +184,14 @@ pub async fn run(
                 let (tx, rx) = mpsc::channel(CLIENT_QUEUE);
                 let (read_half, write_half) = stream.into_split();
                 tokio::spawn(write_loop(write_half, rx));
-                tokio::spawn(read_loop(next_id, read_half, in_tx.clone()));
+                let reader = tokio::spawn(read_loop(next_id, read_half, in_tx.clone()));
                 let hello = json!({"proto": PROTO_VERSION, "daemon": settings.daemon_version, "mic_rate": MIC_RATE, "mic_channels": 1});
                 let _ = tx.try_send(frame(msg::HELLO, hello.to_string().as_bytes()));
                 for (addr, p) in &peers {
                     let _ = tx.try_send(peer_frame("connected", &p.name, *addr, p.rtt_ms));
                 }
                 mic.reset();
-                client = Some(Client { id: next_id, tx, open_ids: HashSet::new(), name: "a client".into() });
+                client = Some(Client { id: next_id, tx, reader, open_ids: HashSet::new(), name: "a client".into() });
                 debug!("bridge client {next_id} connected");
             }
             Some(incoming) = in_rx.recv() => match incoming {
@@ -241,6 +257,13 @@ fn peer_frame(state: &str, name: &str, addr: IpAddr, rtt_ms: Option<u32>) -> Vec
     frame(msg::PEER, body.to_string().as_bytes())
 }
 
+impl Drop for Client {
+    /// Dropping the sender ends the write loop, which closes the socket; stop reading it too.
+    fn drop(&mut self) {
+        self.reader.abort();
+    }
+}
+
 /// Queue a control frame. A client too far behind to take one is cut off rather than misled.
 fn send_control(client: &mut Option<Client>, bytes: Vec<u8>) {
     if let Some(c) = client.as_ref() {
@@ -251,18 +274,34 @@ fn send_control(client: &mut Option<Client>, bytes: Vec<u8>) {
     }
 }
 
-fn handle_client_frame(c: &mut Client, kind: u8, payload: &[u8], commands: &mpsc::UnboundedSender<Command>) -> Result<(), String> {
+fn handle_client_frame(
+    c: &mut Client,
+    kind: u8,
+    payload: &[u8],
+    commands: &mpsc::UnboundedSender<Command>,
+) -> Result<(), String> {
     fn parse<'a, T: Deserialize<'a>>(what: &str, payload: &'a [u8]) -> Result<T, String> {
         serde_json::from_slice(payload).map_err(|e| format!("{what} is not valid JSON: {e}"))
     }
-    let send = |cmd: Command| commands.send(cmd).map_err(|_| "the daemon is shutting down".to_string());
+    let send = |cmd: Command| {
+        commands
+            .send(cmd)
+            .map_err(|_| "the daemon is shutting down".to_string())
+    };
     match kind {
         msg::CLIENT_HELLO => {
             let hello: ClientHello = parse("HELLO", payload)?;
-            c.name = if hello.client.is_empty() { "a client".into() } else { hello.client };
+            c.name = if hello.client.is_empty() {
+                "a client".into()
+            } else {
+                hello.client
+            };
             info!("bridge client connected: {}", c.name);
             if hello.proto != PROTO_VERSION {
-                return Err(format!("this daemon speaks bridge protocol {PROTO_VERSION}, the client asked for {}", hello.proto));
+                return Err(format!(
+                    "this daemon speaks bridge protocol {PROTO_VERSION}, the client asked for {}",
+                    hello.proto
+                ));
             }
             Ok(())
         }
@@ -271,33 +310,54 @@ fn handle_client_frame(c: &mut Client, kind: u8, payload: &[u8], commands: &mpsc
             if begin.id.is_empty() {
                 return Err("TTS_BEGIN needs a non-empty id".into());
             }
-            if !(1000..=384_000).contains(&begin.sample_rate) || !(1..=2).contains(&begin.channels) {
-                return Err(format!("TTS_BEGIN {}: sample_rate {} and channels {} are not supported", begin.id, begin.sample_rate, begin.channels));
+            if !(1000..=384_000).contains(&begin.sample_rate) || !(1..=2).contains(&begin.channels)
+            {
+                return Err(format!(
+                    "TTS_BEGIN {}: sample_rate {} and channels {} are not supported",
+                    begin.id, begin.sample_rate, begin.channels
+                ));
             }
             if !c.open_ids.insert(begin.id.clone()) {
                 return Err(format!("utterance id {:?} is already queued", begin.id));
             }
-            send(Command::TtsBegin { id: begin.id, sample_rate: begin.sample_rate, channels: begin.channels })
+            send(Command::TtsBegin {
+                id: begin.id,
+                sample_rate: begin.sample_rate,
+                channels: begin.channels,
+            })
         }
         msg::TTS_PCM => {
             if payload.len() % 2 != 0 {
                 return Err("TTS_PCM must hold whole 16-bit samples".into());
             }
-            let samples = payload.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
+            let samples = payload
+                .chunks_exact(2)
+                .map(|b| i16::from_le_bytes([b[0], b[1]]))
+                .collect();
             send(Command::TtsPcm(samples))
         }
-        msg::TTS_END => send(Command::TtsEnd { id: parse::<WithId>("TTS_END", payload)?.id }),
-        msg::TTS_ABORT => send(Command::TtsAbort { id: parse::<WithId>("TTS_ABORT", payload)?.id }),
+        msg::TTS_END => send(Command::TtsEnd {
+            id: parse::<WithId>("TTS_END", payload)?.id,
+        }),
+        msg::TTS_ABORT => send(Command::TtsAbort {
+            id: parse::<WithId>("TTS_ABORT", payload)?.id,
+        }),
         msg::CUE => {
             let cue: CueMsg = parse("CUE", payload)?;
-            let cue = Cue::from_name(&cue.name).ok_or_else(|| format!("unknown cue {:?}; use listening, done or error", cue.name))?;
+            let cue = Cue::from_name(&cue.name).ok_or_else(|| {
+                format!("unknown cue {:?}; use listening, done or error", cue.name)
+            })?;
             send(Command::Cue(cue))
         }
         other => Err(format!("unknown message type 0x{other:02X}")),
     }
 }
 
-async fn read_loop(id: u64, mut reader: tokio::net::unix::OwnedReadHalf, tx: mpsc::UnboundedSender<Incoming>) {
+async fn read_loop(
+    id: u64,
+    mut reader: tokio::net::unix::OwnedReadHalf,
+    tx: mpsc::UnboundedSender<Incoming>,
+) {
     loop {
         match read_frame(&mut reader).await {
             Ok(Some((kind, payload))) => {
@@ -333,7 +393,10 @@ pub struct MicConverter {
 
 impl MicConverter {
     pub fn new() -> anyhow::Result<Self> {
-        Ok(Self { resampler: StreamResampler::new(48_000, MIC_RATE, 1)?, pending: Vec::new() })
+        Ok(Self {
+            resampler: StreamResampler::new(48_000, MIC_RATE, 1)?,
+            pending: Vec::new(),
+        })
     }
 
     pub fn reset(&mut self) {
@@ -346,7 +409,10 @@ impl MicConverter {
         }
         let chunk = MIC_CHUNK_SAMPLES * 2;
         let whole = self.pending.len() / chunk * chunk;
-        let out = self.pending[..whole].chunks(chunk).map(<[u8]>::to_vec).collect();
+        let out = self.pending[..whole]
+            .chunks(chunk)
+            .map(<[u8]>::to_vec)
+            .collect();
         self.pending.drain(..whole);
         out
     }
@@ -368,8 +434,14 @@ mod tests {
         let mut bytes = frame(msg::MIC, b"abc");
         bytes.extend(frame(msg::HELLO, b""));
         let mut r = &bytes[..];
-        assert_eq!(read_frame(&mut r).await.unwrap(), Some((msg::MIC, b"abc".to_vec())));
-        assert_eq!(read_frame(&mut r).await.unwrap(), Some((msg::HELLO, vec![])));
+        assert_eq!(
+            read_frame(&mut r).await.unwrap(),
+            Some((msg::MIC, b"abc".to_vec()))
+        );
+        assert_eq!(
+            read_frame(&mut r).await.unwrap(),
+            Some((msg::HELLO, vec![]))
+        );
         assert_eq!(read_frame(&mut r).await.unwrap(), None);
         let huge = [msg::TTS_PCM, 0xFF, 0xFF, 0xFF, 0xFF];
         assert!(read_frame(&mut &huge[..]).await.is_err());
@@ -383,10 +455,17 @@ mod tests {
             chunks.extend(m.push(&vec![0.25f32; 960 * 2]));
         }
         // One second in, minus the resampler's start-up delay still held back.
-        assert!(chunks.len() >= 48 && chunks.len() <= 50, "{} chunks", chunks.len());
+        assert!(
+            chunks.len() >= 48 && chunks.len() <= 50,
+            "{} chunks",
+            chunks.len()
+        );
         assert!(chunks.iter().all(|c| c.len() == 640));
         let last = &chunks[chunks.len() - 1];
         let v = i16::from_le_bytes([last[100], last[101]]);
-        assert!((v as i32 - 8192).abs() < 50, "a steady 0.25 must come through as about 8192, got {v}");
+        assert!(
+            (v as i32 - 8192).abs() < 50,
+            "a steady 0.25 must come through as about 8192, got {v}"
+        );
     }
 }

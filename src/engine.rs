@@ -60,10 +60,18 @@ pub struct EngineConfig {
 
 #[derive(Debug)]
 pub enum Command {
-    TtsBegin { id: String, sample_rate: u32, channels: usize },
+    TtsBegin {
+        id: String,
+        sample_rate: u32,
+        channels: usize,
+    },
     TtsPcm(Vec<i16>),
-    TtsEnd { id: String },
-    TtsAbort { id: String },
+    TtsEnd {
+        id: String,
+    },
+    TtsAbort {
+        id: String,
+    },
     /// Drop every queued utterance, reporting each done (the bridge client went away).
     AbortAll,
     Cue(Cue),
@@ -73,13 +81,27 @@ pub enum Command {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
-    PeerConnected { name: String, addr: IpAddr, rtt_ms: Option<u32> },
-    PeerLost { name: String, addr: IpAddr },
+    PeerConnected {
+        name: String,
+        addr: IpAddr,
+        rtt_ms: Option<u32>,
+    },
+    PeerLost {
+        name: String,
+        addr: IpAddr,
+    },
     /// Decoded microphone audio from the selected peer, 48 kHz interleaved stereo.
-    Mic { from: IpAddr, samples: Vec<f32> },
-    PlaybackDone { id: String },
+    Mic {
+        from: IpAddr,
+        samples: Vec<f32>,
+    },
+    PlaybackDone {
+        id: String,
+    },
     /// A command could not be carried out; the message is for the bridge client.
-    CommandRejected { message: String },
+    CommandRejected {
+        message: String,
+    },
 }
 
 pub struct EngineHandle {
@@ -112,7 +134,10 @@ impl Drop for EngineHandle {
 /// Bind the audio socket and start the engine.
 pub async fn start(config: EngineConfig) -> anyhow::Result<EngineHandle> {
     let socket = bind_audio_socket(config.bind).with_context(|| {
-        format!("cannot open UDP port {}; is another RemSound or remsoundd already running?", config.bind.port())
+        format!(
+            "cannot open UDP port {}; is another RemSound or remsoundd already running?",
+            config.bind.port()
+        )
     })?;
     let local_addr = socket.local_addr()?;
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -120,7 +145,13 @@ pub async fn start(config: EngineConfig) -> anyhow::Result<EngineHandle> {
     let (stop_tx, stop_rx) = oneshot::channel();
     let engine = Engine::new(config, Arc::new(socket), event_tx)?;
     let task = tokio::spawn(engine.run(cmd_rx, stop_rx));
-    Ok(EngineHandle { commands: cmd_tx, events: event_rx, local_addr, shutdown: Some(stop_tx), task: Some(task) })
+    Ok(EngineHandle {
+        commands: cmd_tx,
+        events: event_rx,
+        local_addr,
+        shutdown: Some(stop_tx),
+        task: Some(task),
+    })
 }
 
 fn bind_audio_socket(addr: SocketAddr) -> std::io::Result<UdpSocket> {
@@ -160,7 +191,8 @@ impl Peer {
     }
 
     fn answering(&self, now: Instant) -> bool {
-        self.last_pong.is_some_and(|t| now.duration_since(t) <= UNREACHABLE_WINDOW)
+        self.last_pong
+            .is_some_and(|t| now.duration_since(t) <= UNREACHABLE_WINDOW)
     }
 }
 
@@ -226,12 +258,20 @@ fn new_stream_id() -> u16 {
 }
 
 fn unix_now() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 impl Engine {
-    fn new(config: EngineConfig, socket: Arc<UdpSocket>, events: mpsc::Sender<Event>) -> anyhow::Result<Self> {
-        let mut encoder = opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio)?;
+    fn new(
+        config: EngineConfig,
+        socket: Arc<UdpSocket>,
+        events: mpsc::Sender<Event>,
+    ) -> anyhow::Result<Self> {
+        let mut encoder =
+            opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio)?;
         encoder.set_bitrate(opus::Bitrate::Bits(config.bitrate))?;
         encoder.set_inband_fec(true)?;
         encoder.set_packet_loss_perc(10)?;
@@ -239,7 +279,11 @@ impl Engine {
             .peers
             .iter()
             .map(|spec| Peer {
-                addr: spec.host.parse::<IpAddr>().ok().map(|ip| SocketAddr::new(ip, spec.port)),
+                addr: spec
+                    .host
+                    .parse::<IpAddr>()
+                    .ok()
+                    .map(|ip| SocketAddr::new(ip, spec.port)),
                 spec: spec.clone(),
                 resolved_at: None,
                 resolving: false,
@@ -281,7 +325,11 @@ impl Engine {
         })
     }
 
-    async fn run(mut self, mut commands: mpsc::UnboundedReceiver<Command>, mut stop: oneshot::Receiver<()>) {
+    async fn run(
+        mut self,
+        mut commands: mpsc::UnboundedReceiver<Command>,
+        mut stop: oneshot::Receiver<()>,
+    ) {
         let mut resolved_rx = self.resolved_rx.take().unwrap();
         let mut ping = tokio::time::interval(PING_INTERVAL);
         let mut proofs = tokio::time::interval(tickproof::SEND_INTERVAL);
@@ -337,7 +385,10 @@ impl Engine {
         if let Err(e) = self.events.try_send(event) {
             if is_mic {
                 self.counters.mic_dropped += 1;
-                if self.throttle.allow("mic-drop", Duration::from_secs(30), Instant::now()) {
+                if self
+                    .throttle
+                    .allow("mic-drop", Duration::from_secs(30), Instant::now())
+                {
                     warn!("microphone audio is being dropped: nothing is reading it fast enough ({} chunks so far)", self.counters.mic_dropped);
                 }
             } else if matches!(e, mpsc::error::TrySendError::Full(_)) {
@@ -354,7 +405,11 @@ impl Engine {
                 }
             }
         }
-        self.peers.iter().find(|p| p.ip() == Some(ip)).map(|p| p.spec.label.clone()).unwrap_or_else(|| ip.to_string())
+        self.peers
+            .iter()
+            .find(|p| p.ip() == Some(ip))
+            .map(|p| p.spec.host.clone())
+            .unwrap_or_else(|| ip.to_string())
     }
 
     /// "PC-DESKTOP at 100.64.0.5", or just the address when that is all we know.
@@ -375,7 +430,6 @@ impl Engine {
         self.peer_index(ip).is_some()
     }
 
-
     // ---- receiving ------------------------------------------------------------------------------
 
     async fn handle_packet(&mut self, packet: &[u8], from: SocketAddr) {
@@ -386,7 +440,9 @@ impl Engine {
         let now = Instant::now();
         match header.packet_type() {
             Some(PacketType::Format) => self.on_format(from, header.stream_id, payload, now),
-            Some(PacketType::Audio) => self.on_audio(from, header.stream_id, header.sequence, payload, now),
+            Some(PacketType::Audio) => {
+                self.on_audio(from, header.stream_id, header.sequence, payload, now)
+            }
             Some(PacketType::Heartbeat) => self.on_heartbeat(from, payload, now).await,
             Some(PacketType::TickProof) => self.on_tick_proof(from, payload, now),
             // KeepAlive is a pre-2026-05 leftover; Control (remote volume), AddrCheck (relay) and
@@ -401,14 +457,25 @@ impl Engine {
             return;
         };
         if let Err(why) = format.check_usable() {
-            if self.throttle.allow(format!("badformat-{}", from.ip()), Duration::from_secs(5), now) {
-                warn!("{} announced a stream this daemon cannot play: {why}", self.who(from.ip()));
+            if self.throttle.allow(
+                format!("badformat-{}", from.ip()),
+                Duration::from_secs(5),
+                now,
+            ) {
+                warn!(
+                    "{} announced a stream this daemon cannot play: {why}",
+                    self.who(from.ip())
+                );
             }
             return;
         }
         if !self.allowed(from.ip()) {
             self.counters.not_allowed += 1;
-            if self.throttle.allow(format!("notallowed-{}", from.ip()), Duration::from_secs(60), now) {
+            if self.throttle.allow(
+                format!("notallowed-{}", from.ip()),
+                Duration::from_secs(60),
+                now,
+            ) {
                 info!(
                     "{} is sending audio to this daemon but is not in its peers list, so it is ignored. Add {} to peers in the config to accept it",
                     self.who(from.ip()),
@@ -432,14 +499,23 @@ impl Engine {
                 let superseded: Vec<_> = self
                     .sessions
                     .iter()
-                    .filter(|((ep, id), s)| *ep == from && *id != stream_id && s.format.lane == format.lane)
+                    .filter(|((ep, id), s)| {
+                        *ep == from && *id != stream_id && s.format.lane == format.lane
+                    })
                     .map(|(k, _)| *k)
                     .collect();
                 for k in superseded {
                     self.sessions.remove(&k);
-                    debug!("stream {} from {} replaced by stream {stream_id}", k.1, from);
+                    debug!(
+                        "stream {} from {} replaced by stream {stream_id}",
+                        k.1, from
+                    );
                 }
-                let verb = if changed { "changed its stream to" } else { "is sending" };
+                let verb = if changed {
+                    "changed its stream to"
+                } else {
+                    "is sending"
+                };
                 info!("{} {verb} {}", self.who(from.ip()), format.describe());
             }
             Err(e) => warn!("could not open a stream from {}: {e}", self.who(from.ip())),
@@ -449,7 +525,9 @@ impl Engine {
     fn note_security(&mut self, ip: IpAddr, fingerprint: Option<&[u8]>) {
         let status = match fingerprint {
             None => Security::NeedsUpdate,
-            Some(f) if fingerprints_equal(f, &self.config.credentials.fingerprint) => Security::Matches,
+            Some(f) if fingerprints_equal(f, &self.config.credentials.fingerprint) => {
+                Security::Matches
+            }
             Some(_) => Security::Mismatch,
         };
         if self.security.insert(ip, status) == Some(status) {
@@ -467,7 +545,14 @@ impl Engine {
         }
     }
 
-    fn on_audio(&mut self, from: SocketAddr, stream_id: u16, sequence: u32, payload: &[u8], now: Instant) {
+    fn on_audio(
+        &mut self,
+        from: SocketAddr,
+        stream_id: u16,
+        sequence: u32,
+        payload: &[u8],
+        now: Instant,
+    ) {
         if !self.allowed(from.ip()) {
             self.counters.not_allowed += 1;
             return;
@@ -486,8 +571,17 @@ impl Engine {
                 self.peers[i].last_audio = Some(now);
             }
         }
-        if failed && self.throttle.allow(format!("decrypt-{}", from.ip()), Duration::from_secs(30), now) {
-            warn!("audio from {} does not decrypt: the passwords differ", self.who(from.ip()));
+        if failed
+            && self.throttle.allow(
+                format!("decrypt-{}", from.ip()),
+                Duration::from_secs(30),
+                now,
+            )
+        {
+            warn!(
+                "audio from {} does not decrypt: the passwords differ",
+                self.who(from.ip())
+            );
         }
     }
 
@@ -514,7 +608,9 @@ impl Engine {
                     return;
                 }
                 let rtt = (self.clock.elapsed().as_millis() as i64 - stamp).max(0) as u32;
-                let Some(i) = self.peer_index(from.ip()) else { return };
+                let Some(i) = self.peer_index(from.ip()) else {
+                    return;
+                };
                 let peer = &mut self.peers[i];
                 peer.rtt_ms = Some(match peer.rtt_ms {
                     Some(old) => (old as f64 * 0.7 + rtt as f64 * 0.3) as u32,
@@ -532,7 +628,11 @@ impl Engine {
             return;
         }
         // One every two seconds per address is plenty: a peer sends one every five.
-        if self.proof_seen.get(&from.ip()).is_some_and(|t| now.duration_since(*t) < Duration::from_secs(2)) {
+        if self
+            .proof_seen
+            .get(&from.ip())
+            .is_some_and(|t| now.duration_since(*t) < Duration::from_secs(2))
+        {
             return;
         }
         if self.proof_seen.len() > 1024 {
@@ -542,16 +642,26 @@ impl Engine {
         let who = self.who(from.ip());
         match self.guard.accept(&self.cipher, payload, unix_now()) {
             Ok(proof) => {
-                if self.throttle.allow(format!("proof-ok-{}", from.ip()), Duration::from_secs(3600), now) {
+                if self.throttle.allow(
+                    format!("proof-ok-{}", from.ip()),
+                    Duration::from_secs(3600),
+                    now,
+                ) {
                     let device = self
                         .config
                         .names
                         .as_ref()
-                        .and_then(|t| t.try_lock().ok().and_then(|t| t.instance_name(proof.instance)))
+                        .and_then(|t| {
+                            t.try_lock()
+                                .ok()
+                                .and_then(|t| t.instance_name(proof.instance))
+                        })
                         .map(|n| format!(" (device {n})"))
                         .unwrap_or_default();
                     if self.allowed(from.ip()) {
-                        info!("{who}{device} has ticked this daemon and proved it has our password");
+                        info!(
+                            "{who}{device} has ticked this daemon and proved it has our password"
+                        );
                     } else {
                         info!(
                             "{who}{device} has ticked this daemon and proved it has our password, but is not in the peers list. Add {} to peers in the config to connect",
@@ -561,7 +671,11 @@ impl Engine {
                 }
             }
             Err(rejection) => {
-                if self.throttle.allow(format!("proof-bad-{}-{rejection}", from.ip()), Duration::from_secs(600), now) {
+                if self.throttle.allow(
+                    format!("proof-bad-{}-{rejection}", from.ip()),
+                    Duration::from_secs(600),
+                    now,
+                ) {
                     match rejection {
                         tickproof::Rejection::NotOurPassword => warn!("password mismatch: {who} ticked this daemon, but with a different password"),
                         other => warn!("{who} sent a tick proof that was refused: {other}"),
@@ -587,14 +701,26 @@ impl Engine {
                 Some(Security::Mismatch) => ", but its password is different",
                 _ => "",
             };
-            info!("{name} connected over {ip}, round trip {} ms{password}", rtt.unwrap_or(0));
-            self.emit(Event::PeerConnected { name, addr: ip, rtt_ms: rtt });
+            info!(
+                "{name} connected over {ip}, round trip {} ms{password}",
+                rtt.unwrap_or(0)
+            );
+            self.emit(Event::PeerConnected {
+                name,
+                addr: ip,
+                rtt_ms: rtt,
+            });
         } else if !answering && peer.connected {
             self.peers[i].connected = false;
             let name = self.peer_name(ip);
             warn!("{name} at {ip} is unreachable: no answer to pings for 5 seconds");
             self.emit(Event::PeerLost { name, addr: ip });
-        } else if !answering && !peer.said_unreachable && peer.first_ping.is_some_and(|t| now.duration_since(t) > UNREACHABLE_WINDOW) {
+        } else if !answering
+            && !peer.said_unreachable
+            && peer
+                .first_ping
+                .is_some_and(|t| now.duration_since(t) > UNREACHABLE_WINDOW)
+        {
             self.peers[i].said_unreachable = true;
             warn!(
                 "{} has not answered pings yet. Check that RemSound is running there, that it has this machine ticked, and that UDP port {} is open",
@@ -607,7 +733,11 @@ impl Engine {
     fn send_targets(&self, now: Instant) -> Vec<SocketAddr> {
         self.peers
             .iter()
-            .filter(|p| p.connected || p.last_audio.is_some_and(|t| now.duration_since(t) <= RECEIVING_KEEPS_ARMED))
+            .filter(|p| {
+                p.connected
+                    || p.last_audio
+                        .is_some_and(|t| now.duration_since(t) <= RECEIVING_KEEPS_ARMED)
+            })
             .filter_map(|p| p.addr)
             .collect()
     }
@@ -618,7 +748,12 @@ impl Engine {
         self.recent_pings[self.ping_slot] = stamp;
         self.ping_slot = (self.ping_slot + 1) % self.recent_pings.len();
         self.control_seq = self.control_seq.wrapping_add(1);
-        let ping = protocol::packet(PacketType::Heartbeat, CONTROL_STREAM_ID, self.control_seq, &protocol::write_heartbeat_payload(HeartbeatKind::Ping, stamp));
+        let ping = protocol::packet(
+            PacketType::Heartbeat,
+            CONTROL_STREAM_ID,
+            self.control_seq,
+            &protocol::write_heartbeat_payload(HeartbeatKind::Ping, stamp),
+        );
         for i in 0..self.peers.len() {
             if let Some(addr) = self.peers[i].addr {
                 self.peers[i].first_ping.get_or_insert(now);
@@ -627,7 +762,12 @@ impl Engine {
             self.update_health(i, now);
         }
         // Sessions with no audio for 4 s are gone, as on Windows.
-        let idle: Vec<_> = self.sessions.iter().filter(|(_, s)| s.idle_for(now) > SESSION_IDLE_TIMEOUT).map(|(k, _)| *k).collect();
+        let idle: Vec<_> = self
+            .sessions
+            .iter()
+            .filter(|(_, s)| s.idle_for(now) > SESSION_IDLE_TIMEOUT)
+            .map(|(k, _)| *k)
+            .collect();
         for key in idle {
             if let Some(s) = self.sessions.remove(&key) {
                 let st = &s.stats;
@@ -645,7 +785,12 @@ impl Engine {
     async fn send_tick_proofs(&mut self) {
         let sealed = tickproof::seal(&self.cipher, self.config.instance, unix_now());
         self.control_seq = self.control_seq.wrapping_add(1);
-        let packet = protocol::packet(PacketType::TickProof, CONTROL_STREAM_ID, self.control_seq, &sealed);
+        let packet = protocol::packet(
+            PacketType::TickProof,
+            CONTROL_STREAM_ID,
+            self.control_seq,
+            &sealed,
+        );
         let targets: Vec<_> = self.peers.iter().filter_map(|p| p.addr).collect();
         for addr in targets {
             send_to(&self.socket, &packet, addr).await;
@@ -657,8 +802,16 @@ impl Engine {
     async fn send_format(&mut self, targets: &[SocketAddr], now: Instant) {
         self.last_format = Some(now);
         self.format_seq = self.format_seq.wrapping_add(1);
-        let payload = protocol::write_format_payload(&AudioFormat::opus_48k_stereo(SEND_FRAME_SAMPLES as i32), Some(&self.config.credentials.fingerprint));
-        let packet = protocol::packet(PacketType::Format, self.stream_id, self.format_seq, &payload);
+        let payload = protocol::write_format_payload(
+            &AudioFormat::opus_48k_stereo(SEND_FRAME_SAMPLES as i32),
+            Some(&self.config.credentials.fingerprint),
+        );
+        let packet = protocol::packet(
+            PacketType::Format,
+            self.stream_id,
+            self.format_seq,
+            &payload,
+        );
         for &t in targets {
             send_to(&self.socket, &packet, t).await;
         }
@@ -669,11 +822,14 @@ impl Engine {
         let targets = self.send_targets(now);
         let connected = !targets.is_empty();
         let has_content = self.player.has_content();
-        let send_audio = connected && (self.config.send_mode == SendMode::Continuous || has_content);
+        let send_audio =
+            connected && (self.config.send_mode == SendMode::Continuous || has_content);
 
         // Format goes out every 250 ms while anyone is listening, and at once when a stream (re)starts,
         // so the far end opens its session before the first audio packet.
-        let format_due = self.last_format.is_none_or(|t| now.duration_since(t) >= FORMAT_RESEND_INTERVAL);
+        let format_due = self
+            .last_format
+            .is_none_or(|t| now.duration_since(t) >= FORMAT_RESEND_INTERVAL);
         if connected && (format_due || (send_audio && !self.sending)) {
             self.send_format(&targets, now).await;
         }
@@ -689,7 +845,12 @@ impl Engine {
                 Ok(n) => {
                     let sealed = self.cipher.seal_next(&mut self.nonces, &encoded[..n]);
                     self.audio_seq = self.audio_seq.wrapping_add(1);
-                    let packet = protocol::packet(PacketType::Audio, self.stream_id, self.audio_seq, &sealed);
+                    let packet = protocol::packet(
+                        PacketType::Audio,
+                        self.stream_id,
+                        self.audio_seq,
+                        &sealed,
+                    );
                     for &t in &targets {
                         send_to(&self.socket, &packet, t).await;
                     }
@@ -705,7 +866,11 @@ impl Engine {
 
     fn on_command(&mut self, command: Command) {
         let result = match command {
-            Command::TtsBegin { id, sample_rate, channels } => self.player.begin(&id, sample_rate, channels),
+            Command::TtsBegin {
+                id,
+                sample_rate,
+                channels,
+            } => self.player.begin(&id, sample_rate, channels),
             Command::TtsPcm(samples) => self.player.pcm(&samples),
             Command::TtsEnd { id } => self.player.end(&id),
             Command::TtsAbort { id } => {
@@ -730,7 +895,9 @@ impl Engine {
             }
         };
         if let Err(e) = result {
-            self.emit(Event::CommandRejected { message: e.to_string() });
+            self.emit(Event::CommandRejected {
+                message: e.to_string(),
+            });
         }
     }
 
@@ -744,13 +911,18 @@ impl Engine {
             return self
                 .peers
                 .iter()
-                .find(|p| p.spec.label == wanted || p.spec.host == wanted || p.ip().map(|ip| ip.to_string()).as_deref() == Some(wanted))
+                .find(|p| {
+                    p.spec.label == wanted
+                        || p.spec.host == wanted
+                        || p.ip().map(|ip| ip.to_string()).as_deref() == Some(wanted)
+                })
                 .and_then(Peer::ip);
         }
-        self.peers
-            .iter()
-            .filter_map(Peer::ip)
-            .find(|ip| self.sessions.iter().any(|((ep, _), s)| ep.ip() == *ip && s.idle_for(now) < Duration::from_secs(1)))
+        self.peers.iter().filter_map(Peer::ip).find(|ip| {
+            self.sessions
+                .iter()
+                .any(|((ep, _), s)| ep.ip() == *ip && s.idle_for(now) < Duration::from_secs(1))
+        })
     }
 
     fn on_poll_tick(&mut self) {
@@ -776,7 +948,11 @@ impl Engine {
             if peer.spec.host.parse::<IpAddr>().is_ok() || peer.resolving {
                 continue;
             }
-            if peer.addr.is_some() && peer.resolved_at.is_some_and(|t| now.duration_since(t) < RESOLVE_REFRESH) {
+            if peer.addr.is_some()
+                && peer
+                    .resolved_at
+                    .is_some_and(|t| now.duration_since(t) < RESOLVE_REFRESH)
+            {
                 continue;
             }
             peer.resolving = true;
@@ -795,7 +971,9 @@ impl Engine {
 
     fn on_resolved(&mut self, index: usize, addr: Option<SocketAddr>) {
         let now = Instant::now();
-        let Some(peer) = self.peers.get_mut(index) else { return };
+        let Some(peer) = self.peers.get_mut(index) else {
+            return;
+        };
         peer.resolving = false;
         match addr {
             Some(addr) => {
@@ -813,7 +991,11 @@ impl Engine {
             }
             None => {
                 let host = peer.spec.host.clone();
-                if peer.addr.is_none() && self.throttle.allow(format!("resolve-{host}"), Duration::from_secs(300), now) {
+                if peer.addr.is_none()
+                    && self
+                        .throttle
+                        .allow(format!("resolve-{host}"), Duration::from_secs(300), now)
+                {
                     warn!("cannot find the address of peer {host}; trying again every 10 seconds");
                 }
             }

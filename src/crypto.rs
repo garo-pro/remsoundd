@@ -31,7 +31,12 @@ pub fn derive_key(password: &str) -> Key {
 
 pub fn fingerprint(password: &str) -> Fingerprint {
     let mut print = [0u8; FINGERPRINT_BYTES];
-    pbkdf2::pbkdf2_hmac::<sha2::Sha256>(password.as_bytes(), FINGERPRINT_SALT, PBKDF2_ITERATIONS, &mut print);
+    pbkdf2::pbkdf2_hmac::<sha2::Sha256>(
+        password.as_bytes(),
+        FINGERPRINT_SALT,
+        PBKDF2_ITERATIONS,
+        &mut print,
+    );
     print
 }
 
@@ -50,14 +55,19 @@ pub struct Credentials {
 
 impl Credentials {
     pub fn from_password(password: &str) -> Self {
-        Self { key: derive_key(password), fingerprint: fingerprint(password) }
+        Self {
+            key: derive_key(password),
+            fingerprint: fingerprint(password),
+        }
     }
 }
 
 impl std::fmt::Debug for Credentials {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Never print the key.
-        f.debug_struct("Credentials").field("fingerprint", &hex(&self.fingerprint)).finish_non_exhaustive()
+        f.debug_struct("Credentials")
+            .field("fingerprint", &hex(&self.fingerprint))
+            .finish_non_exhaustive()
     }
 }
 
@@ -73,7 +83,9 @@ pub struct Cipher {
 
 impl Cipher {
     pub fn new(key: &Key) -> Self {
-        Self { aead: Aes256Gcm::new(key.into()) }
+        Self {
+            aead: Aes256Gcm::new(key.into()),
+        }
     }
 
     /// Seal with an explicit nonce: `nonce(12) || tag(16) || ciphertext`.
@@ -112,7 +124,9 @@ impl Cipher {
         let nonce = Nonce::from_slice(&sealed[..NONCE_BYTES]);
         let tag = Tag::from_slice(&sealed[NONCE_BYTES..OVERHEAD_BYTES]);
         let mut plain = sealed[OVERHEAD_BYTES..].to_vec();
-        self.aead.decrypt_in_place_detached(nonce, &[], &mut plain, tag).ok()?;
+        self.aead
+            .decrypt_in_place_detached(nonce, &[], &mut plain, tag)
+            .ok()?;
         Some(plain)
     }
 }

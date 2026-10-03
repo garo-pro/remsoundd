@@ -18,7 +18,10 @@ pub fn f32_to_i16(sample: f32) -> i16 {
 
 /// Interleaved stereo to mono, averaging left and right.
 pub fn stereo_to_mono(stereo: &[f32]) -> Vec<f32> {
-    stereo.chunks_exact(2).map(|lr| (lr[0] + lr[1]) * 0.5).collect()
+    stereo
+        .chunks_exact(2)
+        .map(|lr| (lr[0] + lr[1]) * 0.5)
+        .collect()
 }
 
 /// Any channel count to interleaved stereo: mono is duplicated, more than two keeps the first two.
@@ -47,16 +50,34 @@ pub struct StreamResampler {
 impl StreamResampler {
     pub fn new(in_rate: u32, out_rate: u32, channels: usize) -> anyhow::Result<Self> {
         anyhow::ensure!(channels >= 1, "a stream needs at least one channel");
-        anyhow::ensure!((1000..=384_000).contains(&in_rate), "sample rate {in_rate} is out of range");
+        anyhow::ensure!(
+            (1000..=384_000).contains(&in_rate),
+            "sample rate {in_rate} is out of range"
+        );
         let inner = if in_rate == out_rate {
             None
         } else {
             // About 10 ms chunks: small enough to keep latency low, big enough to be efficient.
             let chunk = (in_rate as usize / 100).max(64);
-            Some(FftFixedIn::<f32>::new(in_rate as usize, out_rate as usize, chunk, 1, channels)?)
+            Some(FftFixedIn::<f32>::new(
+                in_rate as usize,
+                out_rate as usize,
+                chunk,
+                1,
+                channels,
+            )?)
         };
         let skip = inner.as_ref().map(|r| r.output_delay()).unwrap_or(0);
-        Ok(Self { channels, inner, pending: vec![Vec::new(); channels], skip, in_frames: 0, out_frames: 0, in_rate, out_rate })
+        Ok(Self {
+            channels,
+            inner,
+            pending: vec![Vec::new(); channels],
+            skip,
+            in_frames: 0,
+            out_frames: 0,
+            in_rate,
+            out_rate,
+        })
     }
 
     pub fn in_rate(&self) -> u32 {
@@ -102,7 +123,11 @@ impl StreamResampler {
             if self.pending[0].len() < need {
                 break;
             }
-            let chunk: Vec<Vec<f32>> = self.pending.iter_mut().map(|p| p.drain(..need).collect()).collect();
+            let chunk: Vec<Vec<f32>> = self
+                .pending
+                .iter_mut()
+                .map(|p| p.drain(..need).collect())
+                .collect();
             match inner.process(&chunk, None) {
                 Ok(planar) => self.emit(planar, &mut out, None),
                 Err(_) => break,
@@ -122,7 +147,8 @@ impl StreamResampler {
         let mut rounds = 0;
         while self.out_frames < expected && rounds < 64 {
             rounds += 1;
-            let partial: Vec<Vec<f32>> = std::mem::replace(&mut self.pending, vec![Vec::new(); self.channels]);
+            let partial: Vec<Vec<f32>> =
+                std::mem::replace(&mut self.pending, vec![Vec::new(); self.channels]);
             let planar = if partial[0].is_empty() {
                 inner.process_partial::<Vec<f32>>(None, None)
             } else {
@@ -171,7 +197,11 @@ impl Cue {
             let fade = (0.008 * WIRE_RATE as f32) as usize;
             for i in 0..n {
                 let env = (i.min(n - 1 - i) as f32 / fade as f32).min(1.0);
-                let s = if freq > 0.0 { 0.3 * env * (std::f32::consts::TAU * freq * i as f32 / WIRE_RATE as f32).sin() } else { 0.0 };
+                let s = if freq > 0.0 {
+                    0.3 * env * (std::f32::consts::TAU * freq * i as f32 / WIRE_RATE as f32).sin()
+                } else {
+                    0.0
+                };
                 out.push(s);
                 out.push(s);
             }
@@ -185,18 +215,28 @@ mod tests {
     use super::*;
 
     fn sine(rate: u32, freq: f32, secs: f32) -> Vec<f32> {
-        (0..(rate as f32 * secs) as usize).map(|i| (std::f32::consts::TAU * freq * i as f32 / rate as f32).sin() * 0.5).collect()
+        (0..(rate as f32 * secs) as usize)
+            .map(|i| (std::f32::consts::TAU * freq * i as f32 / rate as f32).sin() * 0.5)
+            .collect()
     }
 
     /// Dominant frequency by zero crossings: rough but enough to show the pitch survived.
     pub fn zero_crossing_hz(mono: &[f32], rate: u32) -> f32 {
-        let crossings = mono.windows(2).filter(|w| (w[0] < 0.0) != (w[1] < 0.0)).count();
+        let crossings = mono
+            .windows(2)
+            .filter(|w| (w[0] < 0.0) != (w[1] < 0.0))
+            .count();
         crossings as f32 / 2.0 / (mono.len() as f32 / rate as f32)
     }
 
     #[test]
     fn resampler_keeps_length_and_pitch_across_odd_pieces() {
-        for (from, to) in [(24_000, 48_000), (22_050, 48_000), (48_000, 16_000), (16_000, 48_000)] {
+        for (from, to) in [
+            (24_000, 48_000),
+            (22_050, 48_000),
+            (48_000, 16_000),
+            (16_000, 48_000),
+        ] {
             let input = sine(from, 440.0, 1.0);
             let mut r = StreamResampler::new(from, to, 1).unwrap();
             let mut out = Vec::new();
@@ -204,7 +244,11 @@ mod tests {
                 out.extend(r.process(piece));
             }
             out.extend(r.flush());
-            assert_eq!(out.len(), (input.len() as u64 * to as u64 / from as u64) as usize, "{from}->{to}");
+            assert_eq!(
+                out.len(),
+                (input.len() as u64 * to as u64 / from as u64) as usize,
+                "{from}->{to}"
+            );
             let hz = zero_crossing_hz(&out[out.len() / 10..out.len() * 9 / 10], to);
             assert!((hz - 440.0).abs() < 5.0, "{from}->{to}: {hz} Hz");
         }

@@ -12,16 +12,21 @@ pub fn load_or_create(state_dir: &Path) -> anyhow::Result<(Uuid, bool)> {
     let path = state_dir.join(FILE_NAME);
     match std::fs::read_to_string(&path) {
         Ok(text) => {
-            let id = Uuid::parse_str(text.trim()).with_context(|| format!("{} does not hold a valid id", path.display()))?;
+            let id = Uuid::parse_str(text.trim())
+                .with_context(|| format!("{} does not hold a valid id", path.display()))?;
             anyhow::ensure!(!id.is_nil(), "{} holds the all-zero id", path.display());
             Ok((id, false))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            std::fs::create_dir_all(state_dir).with_context(|| format!("cannot create the state directory {}", state_dir.display()))?;
+            std::fs::create_dir_all(state_dir).with_context(|| {
+                format!("cannot create the state directory {}", state_dir.display())
+            })?;
             let id = Uuid::new_v4();
             let tmp = state_dir.join(format!("{FILE_NAME}.tmp"));
-            std::fs::write(&tmp, format!("{id}\n")).with_context(|| format!("cannot write {}", tmp.display()))?;
-            std::fs::rename(&tmp, &path).with_context(|| format!("cannot write {}", path.display()))?;
+            std::fs::write(&tmp, format!("{id}\n"))
+                .with_context(|| format!("cannot write {}", tmp.display()))?;
+            std::fs::rename(&tmp, &path)
+                .with_context(|| format!("cannot write {}", path.display()))?;
             Ok((id, true))
         }
         Err(e) => Err(e).with_context(|| format!("cannot read {}", path.display())),

@@ -40,7 +40,13 @@ struct IncomingAnnouncement {
     can_receive: bool,
 }
 
-pub fn announcement_json(instance: Uuid, name: &str, audio_port: u16, can_send: bool, can_receive: bool) -> String {
+pub fn announcement_json(
+    instance: Uuid,
+    name: &str,
+    audio_port: u16,
+    can_send: bool,
+    can_receive: bool,
+) -> String {
     serde_json::to_string(&OutgoingAnnouncement {
         instance_id: instance.hyphenated().to_string(),
         name,
@@ -76,7 +82,13 @@ pub fn parse_announcement(payload: &[u8], from: IpAddr, own: Uuid) -> Option<Ann
         Some(n) if !n.is_empty() => n.chars().take(MAX_NAME_CHARS).collect(),
         _ => from.to_string(),
     };
-    Some(Announcement { instance, name, audio_port: port as u16, can_send: message.can_send, can_receive: message.can_receive })
+    Some(Announcement {
+        instance,
+        name,
+        audio_port: port as u16,
+        can_send: message.can_send,
+        can_receive: message.can_receive,
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -97,7 +109,14 @@ impl PeerTable {
     pub fn record(&mut self, announcement: Announcement, address: IpAddr, now: Instant) -> bool {
         let key = (announcement.instance, address);
         let new = !self.peers.contains_key(&key);
-        self.peers.insert(key, HeardPeer { announcement, address, last_seen: now });
+        self.peers.insert(
+            key,
+            HeardPeer {
+                announcement,
+                address,
+                last_seen: now,
+            },
+        );
         new
     }
 
@@ -115,16 +134,28 @@ impl PeerTable {
     }
 
     pub fn name_for(&self, address: IpAddr) -> Option<String> {
-        self.peers.values().filter(|p| p.address == address).max_by_key(|p| p.last_seen).map(|p| p.announcement.name.clone())
+        self.peers
+            .values()
+            .filter(|p| p.address == address)
+            .max_by_key(|p| p.last_seen)
+            .map(|p| p.announcement.name.clone())
     }
 
     pub fn instance_name(&self, instance: Uuid) -> Option<String> {
-        self.peers.values().find(|p| p.announcement.instance == instance).map(|p| p.announcement.name.clone())
+        self.peers
+            .values()
+            .find(|p| p.announcement.instance == instance)
+            .map(|p| p.announcement.name.clone())
     }
 
     pub fn list(&self) -> Vec<HeardPeer> {
         let mut v: Vec<_> = self.peers.values().cloned().collect();
-        v.sort_by(|a, b| a.announcement.name.cmp(&b.announcement.name).then(a.address.cmp(&b.address)));
+        v.sort_by(|a, b| {
+            a.announcement
+                .name
+                .cmp(&b.announcement.name)
+                .then(a.address.cmp(&b.address))
+        });
         v
     }
 }
@@ -169,9 +200,9 @@ pub fn broadcast_addresses() -> Vec<Ipv4Addr> {
                 continue;
             }
             if let if_addrs::IfAddr::V4(v4) = iface.addr {
-                let bcast = v4.broadcast.unwrap_or_else(|| {
-                    Ipv4Addr::from(u32::from(v4.ip) | !u32::from(v4.netmask))
-                });
+                let bcast = v4
+                    .broadcast
+                    .unwrap_or_else(|| Ipv4Addr::from(u32::from(v4.ip) | !u32::from(v4.netmask)));
                 if !out.contains(&bcast) {
                     out.push(bcast);
                 }
@@ -185,7 +216,13 @@ pub fn broadcast_addresses() -> Vec<Ipv4Addr> {
 pub async fn run(config: DiscoveryConfig, table: SharedPeerTable) -> anyhow::Result<()> {
     let socket = bind_discovery_socket(config.discovery_port)?;
     info!("discovery listening on UDP port {}", config.discovery_port);
-    let message = announcement_json(config.instance, &config.name, config.audio_port, config.can_send, config.can_receive);
+    let message = announcement_json(
+        config.instance,
+        &config.name,
+        config.audio_port,
+        config.can_send,
+        config.can_receive,
+    );
     let mut heard_from: HashMap<IpAddr, Instant> = HashMap::new();
     let mut ticker = tokio::time::interval(ANNOUNCE_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -273,8 +310,13 @@ mod tests {
         assert!(parse_announcement(nil.as_bytes(), from, own).is_none());
         let other = Uuid::new_v4();
         for port in ["0", "65536", "-1", "99999"] {
-            let m = format!(r#"{{"InstanceId":"{other}","Name":"x","AudioPort":{port},"CanSend":true,"CanReceive":true}}"#);
-            assert!(parse_announcement(m.as_bytes(), from, own).is_none(), "port {port}");
+            let m = format!(
+                r#"{{"InstanceId":"{other}","Name":"x","AudioPort":{port},"CanSend":true,"CanReceive":true}}"#
+            );
+            assert!(
+                parse_announcement(m.as_bytes(), from, own).is_none(),
+                "port {port}"
+            );
         }
         assert!(parse_announcement(b"not json", from, own).is_none());
         // Property names are case-sensitive, as .NET reads them.
@@ -287,16 +329,36 @@ mod tests {
         let own = Uuid::new_v4();
         let other = Uuid::new_v4();
         let from: IpAddr = "10.0.0.9".parse().unwrap();
-        let blank = format!(r#"{{"InstanceId":"{other}","Name":"   ","AudioPort":47830,"CanSend":true,"CanReceive":true}}"#);
-        assert_eq!(parse_announcement(blank.as_bytes(), from, own).unwrap().name, "10.0.0.9");
+        let blank = format!(
+            r#"{{"InstanceId":"{other}","Name":"   ","AudioPort":47830,"CanSend":true,"CanReceive":true}}"#
+        );
+        assert_eq!(
+            parse_announcement(blank.as_bytes(), from, own)
+                .unwrap()
+                .name,
+            "10.0.0.9"
+        );
         let long = announcement_json(other, &"n".repeat(300), 47830, true, true);
-        assert_eq!(parse_announcement(long.as_bytes(), from, own).unwrap().name.chars().count(), 128);
+        assert_eq!(
+            parse_announcement(long.as_bytes(), from, own)
+                .unwrap()
+                .name
+                .chars()
+                .count(),
+            128
+        );
     }
 
     #[test]
     fn table_expires_after_eight_seconds() {
         let mut t = PeerTable::default();
-        let a = Announcement { instance: Uuid::new_v4(), name: "PC".into(), audio_port: 47830, can_send: true, can_receive: true };
+        let a = Announcement {
+            instance: Uuid::new_v4(),
+            name: "PC".into(),
+            audio_port: 47830,
+            can_send: true,
+            can_receive: true,
+        };
         let start = Instant::now();
         assert!(t.record(a.clone(), "10.0.0.2".parse().unwrap(), start));
         assert!(!t.record(a, "10.0.0.2".parse().unwrap(), start));

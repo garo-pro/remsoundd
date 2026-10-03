@@ -15,7 +15,10 @@ pub const RESTART_JUMP: u32 = 1000;
 pub enum Released<T> {
     Item(u32, T),
     /// `count` consecutive sequences starting at `first` never arrived.
-    Lost { first: u32, count: u32 },
+    Lost {
+        first: u32,
+        count: u32,
+    },
 }
 
 pub struct ReorderBuffer<T> {
@@ -30,14 +33,24 @@ pub struct ReorderBuffer<T> {
 
 impl<T> ReorderBuffer<T> {
     pub fn new(window: Duration, max_held: usize) -> Self {
-        Self { window, max_held: max_held.max(1), next: None, held: HashMap::new(), late: 0, duplicates: 0, restarts: 0 }
+        Self {
+            window,
+            max_held: max_held.max(1),
+            next: None,
+            held: HashMap::new(),
+            late: 0,
+            duplicates: 0,
+            restarts: 0,
+        }
     }
 
     pub fn push(&mut self, seq: u32, item: T, now: Instant) {
         let next = *self.next.get_or_insert(seq);
         let ahead = seq.wrapping_sub(next);
         let behind = next.wrapping_sub(seq);
-        if (ahead > RESTART_JUMP && ahead <= u32::MAX / 2) || (behind > RESTART_JUMP && behind < u32::MAX / 2) {
+        if (ahead > RESTART_JUMP && ahead <= u32::MAX / 2)
+            || (behind > RESTART_JUMP && behind < u32::MAX / 2)
+        {
             self.held.clear();
             self.next = Some(seq);
             self.restarts += 1;
@@ -55,19 +68,31 @@ impl<T> ReorderBuffer<T> {
     /// Release everything that is ready, in order.
     pub fn pop(&mut self, now: Instant) -> Vec<Released<T>> {
         let mut out = Vec::new();
-        let Some(mut next) = self.next else { return out };
+        let Some(mut next) = self.next else {
+            return out;
+        };
         loop {
             if let Some((item, _)) = self.held.remove(&next) {
                 out.push(Released::Item(next, item));
                 next = next.wrapping_add(1);
                 continue;
             }
-            let Some(oldest) = self.held.values().map(|(_, at)| *at).min() else { break };
+            let Some(oldest) = self.held.values().map(|(_, at)| *at).min() else {
+                break;
+            };
             if now.duration_since(oldest) < self.window && self.held.len() <= self.max_held {
                 break;
             }
-            let first_held = self.held.keys().copied().min_by_key(|s| s.wrapping_sub(next)).unwrap();
-            out.push(Released::Lost { first: next, count: first_held.wrapping_sub(next) });
+            let first_held = self
+                .held
+                .keys()
+                .copied()
+                .min_by_key(|s| s.wrapping_sub(next))
+                .unwrap();
+            out.push(Released::Lost {
+                first: next,
+                count: first_held.wrapping_sub(next),
+            });
             next = first_held;
         }
         self.next = Some(next);
@@ -122,7 +147,10 @@ mod tests {
         b.push(4, 4, t);
         b.push(5, 5, t);
         assert_eq!(items(b.pop(t + Duration::from_millis(30))), ["1"]);
-        assert_eq!(items(b.pop(t + Duration::from_millis(61))), ["lost 2+2", "4", "5"]);
+        assert_eq!(
+            items(b.pop(t + Duration::from_millis(61))),
+            ["lost 2+2", "4", "5"]
+        );
         b.push(3, 3, t + Duration::from_millis(70));
         assert_eq!(b.late, 1);
         assert!(b.pop(t + Duration::from_millis(80)).is_empty());
@@ -161,6 +189,9 @@ mod tests {
         b.push(u32::MAX, 1, t);
         b.push(0, 2, t);
         b.push(1, 3, t);
-        assert_eq!(items(b.pop(t)), [u32::MAX.to_string(), "0".into(), "1".into()]);
+        assert_eq!(
+            items(b.pop(t)),
+            [u32::MAX.to_string(), "0".into(), "1".into()]
+        );
     }
 }

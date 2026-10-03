@@ -96,7 +96,14 @@ pub fn read_header(packet: &[u8]) -> Option<(Header, &[u8])> {
         stream_id = 1;
     }
     let sequence = u32::from_le_bytes(packet[8..12].try_into().unwrap());
-    Some((Header { kind: packet[5], stream_id, sequence }, &packet[HEADER_SIZE..]))
+    Some((
+        Header {
+            kind: packet[5],
+            stream_id,
+            sequence,
+        },
+        &packet[HEADER_SIZE..],
+    ))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -169,7 +176,10 @@ impl AudioFormat {
             return Err(format!("channel count {} (must be 1 or 2)", self.channels));
         }
         if !(8000..=192_000).contains(&self.sample_rate) {
-            return Err(format!("sample rate {} (outside 8000-192000)", self.sample_rate));
+            return Err(format!(
+                "sample rate {} (outside 8000-192000)",
+                self.sample_rate
+            ));
         }
         if !(1..=MAX_FRAME_SAMPLES_PER_CHANNEL).contains(&self.frame_samples_per_channel) {
             return Err(format!(
@@ -179,23 +189,38 @@ impl AudioFormat {
         }
         match self.codec() {
             None => Err(format!("unknown codec {}", self.codec)),
-            Some(Codec::OpusCustom) => Err("Jamulus-style custom Opus, which this daemon cannot decode".into()),
-            Some(Codec::Opus) if ![8000, 12000, 16000, 24000, 48000].contains(&self.sample_rate) => Err(format!(
-                "Opus at {} Hz (Opus supports 8000, 12000, 16000, 24000 or 48000)",
-                self.sample_rate
-            )),
+            Some(Codec::OpusCustom) => {
+                Err("Jamulus-style custom Opus, which this daemon cannot decode".into())
+            }
+            Some(Codec::Opus)
+                if ![8000, 12000, 16000, 24000, 48000].contains(&self.sample_rate) =>
+            {
+                Err(format!(
+                    "Opus at {} Hz (Opus supports 8000, 12000, 16000, 24000 or 48000)",
+                    self.sample_rate
+                ))
+            }
             _ => Ok(()),
         }
     }
 
+    /// Plain words for logs: "Opus, 48 kHz stereo, 2.5 ms frames".
     pub fn describe(&self) -> String {
-        let codec = match self.codec() {
-            Some(Codec::Pcm) => "PCM".to_string(),
-            Some(Codec::Opus) => format!("Opus, {:.1} ms frames", self.frame_samples_per_channel as f64 * 1000.0 / self.sample_rate.max(1) as f64),
-            Some(Codec::OpusCustom) => "custom Opus".to_string(),
-            None => format!("codec {}", self.codec),
+        let khz = self.sample_rate as f64 / 1000.0;
+        let layout = match self.channels {
+            1 => "mono",
+            2 => "stereo",
+            _ => "multichannel",
         };
-        format!("{} Hz, {} channel{}, {codec}", self.sample_rate, self.channels, if self.channels == 1 { "" } else { "s" })
+        let frame_ms =
+            self.frame_samples_per_channel as f64 * 1000.0 / self.sample_rate.max(1) as f64;
+        let codec = match self.codec() {
+            Some(Codec::Pcm) => "PCM",
+            Some(Codec::Opus) => "Opus",
+            Some(Codec::OpusCustom) => "custom Opus",
+            None => "an unknown codec",
+        };
+        format!("{codec}, {khz} kHz {layout}, {frame_ms} ms frames")
     }
 }
 
@@ -274,7 +299,10 @@ pub enum HeartbeatKind {
 }
 
 /// The 9-byte heartbeat payload. We never set the flags byte (it advertises custom Opus).
-pub fn write_heartbeat_payload(kind: HeartbeatKind, originator_ms: i64) -> [u8; HEARTBEAT_PAYLOAD_SIZE] {
+pub fn write_heartbeat_payload(
+    kind: HeartbeatKind,
+    originator_ms: i64,
+) -> [u8; HEARTBEAT_PAYLOAD_SIZE] {
     let mut out = [0u8; HEARTBEAT_PAYLOAD_SIZE];
     out[0] = kind as u8;
     out[1..].copy_from_slice(&originator_ms.to_le_bytes());
@@ -353,7 +381,14 @@ mod tests {
     fn header_round_trip() {
         let p = packet(PacketType::Format, 0xBEEF, 42, b"xyz");
         let (h, payload) = read_header(&p).unwrap();
-        assert_eq!(h, Header { kind: 1, stream_id: 0xBEEF, sequence: 42 });
+        assert_eq!(
+            h,
+            Header {
+                kind: 1,
+                stream_id: 0xBEEF,
+                sequence: 42
+            }
+        );
         assert_eq!(payload, b"xyz");
         assert!(read_header(&p[..11]).is_none());
         let mut bad = p.clone();
@@ -412,7 +447,10 @@ mod tests {
         assert_eq!(read_heartbeat_payload(&p), Some((HeartbeatKind::Ping, -5)));
         let mut ten = p.to_vec();
         ten.push(1);
-        assert_eq!(read_heartbeat_payload(&ten), Some((HeartbeatKind::Ping, -5)));
+        assert_eq!(
+            read_heartbeat_payload(&ten),
+            Some((HeartbeatKind::Ping, -5))
+        );
         assert!(read_heartbeat_payload(&p[..8]).is_none());
         let mut bad = p;
         bad[0] = 2;
@@ -422,10 +460,20 @@ mod tests {
     #[test]
     fn pcm_sub_header_rules() {
         let mut v = Vec::new();
-        pcm::write_sub_header(&mut v, pcm::SubHeader { frame_id: 7, part_index: 1, total_parts: 2 });
+        pcm::write_sub_header(
+            &mut v,
+            pcm::SubHeader {
+                frame_id: 7,
+                part_index: 1,
+                total_parts: 2,
+            },
+        );
         v.extend_from_slice(b"ab");
         let (h, rest) = pcm::read_sub_header(&v).unwrap();
-        assert_eq!((h.frame_id, h.part_index, h.total_parts, rest), (7, 1, 2, &b"ab"[..]));
+        assert_eq!(
+            (h.frame_id, h.part_index, h.total_parts, rest),
+            (7, 1, 2, &b"ab"[..])
+        );
         v[4] = 2;
         assert!(pcm::read_sub_header(&v).is_none());
         v[5] = 0;

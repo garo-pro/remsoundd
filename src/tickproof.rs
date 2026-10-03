@@ -65,7 +65,11 @@ impl std::fmt::Display for Rejection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotOurPassword => write!(f, "not our password"),
-            Self::Stale { skew_secs } => write!(f, "stale, its clock is {} minutes away from ours", skew_secs.abs() / 60),
+            Self::Stale { skew_secs } => write!(
+                f,
+                "stale, its clock is {} minutes away from ours",
+                skew_secs.abs() / 60
+            ),
             Self::Replay => write!(f, "a replay of a proof already used"),
         }
     }
@@ -79,10 +83,18 @@ pub struct Guard {
 
 impl Guard {
     pub fn new(max_skew_secs: i64) -> Self {
-        Self { max_skew_secs, seen: HashMap::new() }
+        Self {
+            max_skew_secs,
+            seen: HashMap::new(),
+        }
     }
 
-    pub fn accept(&mut self, cipher: &Cipher, payload: &[u8], now_unix_secs: i64) -> Result<Proof, Rejection> {
+    pub fn accept(
+        &mut self,
+        cipher: &Cipher,
+        payload: &[u8],
+        now_unix_secs: i64,
+    ) -> Result<Proof, Rejection> {
         let proof = unseal(cipher, payload).ok_or(Rejection::NotOurPassword)?;
         let skew = now_unix_secs - proof.unix_secs;
         if skew.abs() > self.max_skew_secs {
@@ -136,10 +148,21 @@ mod tests {
         let fresh = seal(&c, Uuid::new_v4(), now - 30);
         assert!(guard.accept(&c, &fresh, now).is_ok());
         assert_eq!(guard.accept(&c, &fresh, now), Err(Rejection::Replay));
-        assert_eq!(guard.accept(&cipher(2), &seal(&c, Uuid::new_v4(), now), now), Err(Rejection::NotOurPassword));
-        assert!(matches!(guard.accept(&c, &seal(&c, Uuid::new_v4(), now - 601), now), Err(Rejection::Stale { .. })));
-        assert!(matches!(guard.accept(&c, &seal(&c, Uuid::new_v4(), now + 601), now), Err(Rejection::Stale { .. })));
-        assert!(guard.accept(&c, &seal(&c, Uuid::new_v4(), now + 599), now).is_ok());
+        assert_eq!(
+            guard.accept(&cipher(2), &seal(&c, Uuid::new_v4(), now), now),
+            Err(Rejection::NotOurPassword)
+        );
+        assert!(matches!(
+            guard.accept(&c, &seal(&c, Uuid::new_v4(), now - 601), now),
+            Err(Rejection::Stale { .. })
+        ));
+        assert!(matches!(
+            guard.accept(&c, &seal(&c, Uuid::new_v4(), now + 601), now),
+            Err(Rejection::Stale { .. })
+        ));
+        assert!(guard
+            .accept(&c, &seal(&c, Uuid::new_v4(), now + 599), now)
+            .is_ok());
     }
 
     #[test]

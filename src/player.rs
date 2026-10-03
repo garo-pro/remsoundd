@@ -36,7 +36,10 @@ impl std::fmt::Display for PlayerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::BadFormat(why) => write!(f, "TTS format not usable: {why}"),
-            Self::NoOpenUtterance => write!(f, "TTS audio arrived with no utterance open; send TTS_BEGIN first"),
+            Self::NoOpenUtterance => write!(
+                f,
+                "TTS audio arrived with no utterance open; send TTS_BEGIN first"
+            ),
             Self::UnknownId(id) => write!(f, "no queued utterance has id {id:?}"),
             Self::DuplicateId(id) => write!(f, "utterance id {id:?} is already queued"),
         }
@@ -54,14 +57,22 @@ impl Player {
         }
     }
 
-    pub fn begin(&mut self, id: &str, sample_rate: u32, channels: usize) -> Result<(), PlayerError> {
+    pub fn begin(
+        &mut self,
+        id: &str,
+        sample_rate: u32,
+        channels: usize,
+    ) -> Result<(), PlayerError> {
         if !(1..=2).contains(&channels) {
-            return Err(PlayerError::BadFormat(format!("{channels} channels (must be 1 or 2)")));
+            return Err(PlayerError::BadFormat(format!(
+                "{channels} channels (must be 1 or 2)"
+            )));
         }
         if self.utterances.iter().any(|u| u.id == id) {
             return Err(PlayerError::DuplicateId(id.to_string()));
         }
-        let resampler = StreamResampler::new(sample_rate, WIRE_RATE, channels).map_err(|e| PlayerError::BadFormat(e.to_string()))?;
+        let resampler = StreamResampler::new(sample_rate, WIRE_RATE, channels)
+            .map_err(|e| PlayerError::BadFormat(e.to_string()))?;
         if let Some(open) = self.utterances.iter_mut().rev().find(|u| !u.ended) {
             // A new utterance implicitly ends the previous one; its audio is kept.
             let tail = open.resampler.flush();
@@ -81,7 +92,12 @@ impl Player {
 
     /// Append s16 samples, at the declared format, to the open utterance.
     pub fn pcm(&mut self, samples: &[i16]) -> Result<(), PlayerError> {
-        let open = self.utterances.iter_mut().rev().find(|u| !u.ended).ok_or(PlayerError::NoOpenUtterance)?;
+        let open = self
+            .utterances
+            .iter_mut()
+            .rev()
+            .find(|u| !u.ended)
+            .ok_or(PlayerError::NoOpenUtterance)?;
         if open.discard {
             return Ok(());
         }
@@ -92,7 +108,11 @@ impl Player {
     }
 
     pub fn end(&mut self, id: &str) -> Result<(), PlayerError> {
-        let u = self.utterances.iter_mut().find(|u| u.id == id).ok_or_else(|| PlayerError::UnknownId(id.to_string()))?;
+        let u = self
+            .utterances
+            .iter_mut()
+            .find(|u| u.id == id)
+            .ok_or_else(|| PlayerError::UnknownId(id.to_string()))?;
         if !u.ended {
             let tail = u.resampler.flush();
             if !u.discard {
@@ -221,7 +241,11 @@ mod tests {
         assert!(done.is_empty());
         assert!(audio.iter().all(|&s| s > 0.0));
         let (audio, done) = p.pull(F, true);
-        assert_eq!(done, ["a", "b"], "a's tail and all of b fit in the second frame");
+        assert_eq!(
+            done,
+            ["a", "b"],
+            "a's tail and all of b fit in the second frame"
+        );
         assert!(audio[..540 * 2].iter().all(|&s| s > 0.0));
         assert!(audio[540 * 2..540 * 2 + 400].iter().all(|&s| s < 0.0));
         assert!(audio[540 * 2 + 400..].iter().all(|&s| s == 0.0));
@@ -233,7 +257,7 @@ mod tests {
     fn an_open_utterance_waits_and_pads_with_silence() {
         let mut p = Player::new(2.0);
         p.begin("a", 48_000, 2).unwrap();
-        p.pcm(&vec![1000i16; 100]).unwrap();
+        p.pcm(&[1000i16; 100]).unwrap();
         let (audio, done) = p.pull(F, true);
         assert!(done.is_empty());
         assert!(audio[100..].iter().all(|&s| s == 0.0));
@@ -255,7 +279,11 @@ mod tests {
                 break;
             }
         }
-        assert_eq!(frames, 50 * F, "one second at 24 kHz is fifty 20 ms frames at 48 kHz");
+        assert_eq!(
+            frames,
+            50 * F,
+            "one second at 24 kHz is fifty 20 ms frames at 48 kHz"
+        );
     }
 
     #[test]
@@ -266,7 +294,10 @@ mod tests {
         assert_eq!(p.abort("a"), None);
         assert_eq!(p.end("a"), Err(PlayerError::UnknownId("a".into())));
         assert_eq!(p.pcm(&[1, 2]), Err(PlayerError::NoOpenUtterance));
-        assert!(matches!(p.begin("x", 16_000, 3), Err(PlayerError::BadFormat(_))));
+        assert!(matches!(
+            p.begin("x", 16_000, 3),
+            Err(PlayerError::BadFormat(_))
+        ));
     }
 
     #[test]

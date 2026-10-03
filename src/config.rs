@@ -109,17 +109,25 @@ fn default_jitter_ms() -> u64 {
 
 impl Default for BridgeConfig {
     fn default() -> Self {
-        Self { socket: default_socket(), group: None }
+        Self {
+            socket: default_socket(),
+            group: None,
+        }
     }
 }
 impl Default for SendConfig {
     fn default() -> Self {
-        Self { mode: default_send_mode(), bitrate: default_bitrate() }
+        Self {
+            mode: default_send_mode(),
+            bitrate: default_bitrate(),
+        }
     }
 }
 impl Default for ReceiveConfig {
     fn default() -> Self {
-        Self { jitter_ms: default_jitter_ms() }
+        Self {
+            jitter_ms: default_jitter_ms(),
+        }
     }
 }
 
@@ -143,20 +151,30 @@ impl PeerSpec {
             bail!("peer {text:?} is IPv6; RemSound peers are IPv4");
         }
         let (host, port) = match text.rsplit_once(':') {
-            Some((h, p)) => (h, p.parse::<u16>().with_context(|| format!("peer {text:?} has a bad port"))?),
+            Some((h, p)) => (
+                h,
+                p.parse::<u16>()
+                    .with_context(|| format!("peer {text:?} has a bad port"))?,
+            ),
             None => (text, default_port),
         };
         if port == 0 {
             bail!("peer {text:?} has port 0");
         }
-        Ok(Self { label: text.to_string(), host: host.to_string(), port })
+        Ok(Self {
+            label: text.to_string(),
+            host: host.to_string(),
+            port,
+        })
     }
 }
 
 impl Config {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
-        let text = std::fs::read_to_string(path).with_context(|| format!("cannot read the config file {}", path.display()))?;
-        let config: Config = toml::from_str(&text).with_context(|| format!("the config file {} is not valid", path.display()))?;
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("cannot read the config file {}", path.display()))?;
+        let config: Config = toml::from_str(&text)
+            .with_context(|| format!("the config file {} is not valid", path.display()))?;
         config.validate()?;
         Ok(config)
     }
@@ -166,17 +184,26 @@ impl Config {
             bail!("set either password or password_file, not both");
         }
         if !(6_000..=510_000).contains(&self.send.bitrate) {
-            bail!("send.bitrate {} is outside Opus's range of 6000 to 510000", self.send.bitrate);
+            bail!(
+                "send.bitrate {} is outside Opus's range of 6000 to 510000",
+                self.send.bitrate
+            );
         }
         if !(10..=1000).contains(&self.receive.jitter_ms) {
-            bail!("receive.jitter_ms {} must be between 10 and 1000", self.receive.jitter_ms);
+            bail!(
+                "receive.jitter_ms {} must be between 10 and 1000",
+                self.receive.jitter_ms
+            );
         }
         self.peer_specs()?;
         Ok(())
     }
 
     pub fn peer_specs(&self) -> anyhow::Result<Vec<PeerSpec>> {
-        self.peers.iter().map(|p| PeerSpec::parse(p, DEFAULT_AUDIO_PORT)).collect()
+        self.peers
+            .iter()
+            .map(|p| PeerSpec::parse(p, DEFAULT_AUDIO_PORT))
+            .collect()
     }
 
     pub fn display_name(&self) -> String {
@@ -198,19 +225,28 @@ impl Config {
         let (raw, source) = if let Some(p) = &self.password {
             (p.clone(), "the config file".to_string())
         } else if let Some(path) = &self.password_file {
-            let text = std::fs::read_to_string(path).with_context(|| format!("cannot read the password file {}", path.display()))?;
+            let text = std::fs::read_to_string(path)
+                .with_context(|| format!("cannot read the password file {}", path.display()))?;
             (text, format!("the password file {}", path.display()))
         } else if let Some(dir) = std::env::var_os("CREDENTIALS_DIRECTORY") {
             let path = Path::new(&dir).join("password");
-            let text = std::fs::read_to_string(&path).with_context(|| format!("cannot read the systemd credential {}", path.display()))?;
+            let text = std::fs::read_to_string(&path).with_context(|| {
+                format!("cannot read the systemd credential {}", path.display())
+            })?;
             (text, "the systemd credential \"password\"".to_string())
         } else {
             bail!("no password is set: add password_file to the config, or load a systemd credential called password");
         };
         // A file usually ends with a newline that is not part of the password.
-        let password = raw.strip_suffix('\n').map(|p| p.strip_suffix('\r').unwrap_or(p)).unwrap_or(&raw).to_string();
+        let password = raw
+            .strip_suffix('\n')
+            .map(|p| p.strip_suffix('\r').unwrap_or(p))
+            .unwrap_or(&raw)
+            .to_string();
         if password.is_empty() {
-            bail!("the password from {source} is empty; RemSound sends no audio without a password");
+            bail!(
+                "the password from {source} is empty; RemSound sends no audio without a password"
+            );
         }
         Ok((password, source))
     }
@@ -261,13 +297,23 @@ mod tests {
         .unwrap();
         c.validate().unwrap();
         let peers = c.peer_specs().unwrap();
-        assert_eq!(peers[1], PeerSpec { label: "pc-desktop:47831".into(), host: "pc-desktop".into(), port: 47831 });
+        assert_eq!(
+            peers[1],
+            PeerSpec {
+                label: "pc-desktop:47831".into(),
+                host: "pc-desktop".into(),
+                port: 47831
+            }
+        );
         assert_eq!(c.send.mode, SendMode::Burst);
     }
 
     #[test]
     fn mistakes_are_caught() {
-        assert!(toml::from_str::<Config>("pasword = 'x'").is_err(), "a misspelt key is an error, not silently ignored");
+        assert!(
+            toml::from_str::<Config>("pasword = 'x'").is_err(),
+            "a misspelt key is an error, not silently ignored"
+        );
         let c: Config = toml::from_str("password = 'x'\npassword_file = '/p'").unwrap();
         assert!(c.validate().is_err());
         assert!(PeerSpec::parse("host:0", 47830).is_err());
@@ -280,10 +326,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("pw");
         std::fs::write(&file, "secret\n").unwrap();
-        let c: Config = toml::from_str(&format!("password_file = {:?}", file.to_str().unwrap())).unwrap();
+        let c: Config =
+            toml::from_str(&format!("password_file = {:?}", file.to_str().unwrap())).unwrap();
         assert_eq!(c.resolve_password().unwrap().0, "secret");
         std::fs::write(&file, "\n").unwrap();
-        assert!(c.resolve_password().is_err(), "an empty password is refused");
+        assert!(
+            c.resolve_password().is_err(),
+            "an empty password is refused"
+        );
         let c: Config = toml::from_str("password = ''").unwrap();
         assert!(c.resolve_password().is_err());
     }

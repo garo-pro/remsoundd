@@ -13,7 +13,10 @@ use uuid::Uuid;
 
 fn hex(s: &str) -> Vec<u8> {
     let s: String = s.chars().filter(|c| !c.is_whitespace()).collect();
-    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+        .collect()
 }
 
 fn hex_of(b: &[u8]) -> String {
@@ -62,7 +65,10 @@ fn pbkdf2_iterations_are_100k() {
 #[test]
 fn golden_vector_key_and_fingerprint() {
     let password = "remsound cross-port vector";
-    assert_eq!(hex_of(&crypto::derive_key(password)), "9CD07772496B22220FAC888EB0F5FBA005953FF2F71AABF391740FB1D9491B74");
+    assert_eq!(
+        hex_of(&crypto::derive_key(password)),
+        "9CD07772496B22220FAC888EB0F5FBA005953FF2F71AABF391740FB1D9491B74"
+    );
     assert_eq!(hex_of(&crypto::fingerprint(password)), "A77BF56B9EF1266B");
 }
 
@@ -70,17 +76,27 @@ fn golden_vector_key_and_fingerprint() {
 fn fingerprint_is_not_the_key_prefix() {
     // The fingerprint travels in the clear. Derived with the key's salt, it would leak the key.
     let password = "remsound cross-port vector";
-    assert_ne!(&crypto::derive_key(password)[..8], &crypto::fingerprint(password)[..]);
+    assert_ne!(
+        &crypto::derive_key(password)[..8],
+        &crypto::fingerprint(password)[..]
+    );
 }
 
 #[test]
 fn header_bytes() {
     let p = protocol::packet(PacketType::Audio, 0x1234, 0x0A0B0C0D, &[]);
-    assert_eq!(hex_of(&p), "524D4E4401023412" .to_string() + "0D0C0B0A");
+    assert_eq!(hex_of(&p), "524D4E4401023412".to_string() + "0D0C0B0A");
     let p = protocol::packet(PacketType::Audio, 0, 1, &[]);
-    assert_eq!(hex_of(&p), "524D4E440102010001000000", "a stream id of 0 must go out as 1");
+    assert_eq!(
+        hex_of(&p),
+        "524D4E440102010001000000",
+        "a stream id of 0 must go out as 1"
+    );
     let (h, _) = protocol::read_header(&hex("524D4E44 01 04 FFFF 07000000")).unwrap();
-    assert_eq!((h.packet_type(), h.stream_id, h.sequence), (Some(PacketType::Heartbeat), 0xFFFF, 7));
+    assert_eq!(
+        (h.packet_type(), h.stream_id, h.sequence),
+        (Some(PacketType::Heartbeat), 0xFFFF, 7)
+    );
 }
 
 const FORMAT_BYTES: &str =
@@ -88,19 +104,39 @@ const FORMAT_BYTES: &str =
 
 #[test]
 fn format_announcement_bytes() {
-    let format = AudioFormat { lane: 2, capture_latency_ms: 3.5, ..AudioFormat::opus_48k_stereo(120) };
+    let format = AudioFormat {
+        lane: 2,
+        capture_latency_ms: 3.5,
+        ..AudioFormat::opus_48k_stereo(120)
+    };
     let print: [u8; 8] = hex("A0A1A2A3A4A5A6A7").try_into().unwrap();
     let written = protocol::write_format_payload(&format, Some(&print));
     assert_eq!(written.len(), 46);
     assert_eq!(hex_of(&written), hex_of(&hex(FORMAT_BYTES)));
 
     let (read, fingerprint) = protocol::read_format_payload(&hex(FORMAT_BYTES)).unwrap();
-    assert_eq!((read.sample_rate, read.channels, read.codec, read.frame_samples_per_channel, read.lane), (48000, 2, 2, 120, 2));
+    assert_eq!(
+        (
+            read.sample_rate,
+            read.channels,
+            read.codec,
+            read.frame_samples_per_channel,
+            read.lane
+        ),
+        (48000, 2, 2, 120, 2)
+    );
     assert!((read.capture_latency_ms - 3.5).abs() < 0.01);
-    assert_eq!(fingerprint.map(|f| hex_of(&f)), Some("A0A1A2A3A4A5A6A7".into()));
+    assert_eq!(
+        fingerprint.map(|f| hex_of(&f)),
+        Some("A0A1A2A3A4A5A6A7".into())
+    );
 
     let (old, fingerprint) = protocol::read_format_payload(&hex(FORMAT_BYTES)[..32]).unwrap();
-    assert_eq!((old.sample_rate, old.lane, fingerprint), (48000, 0, None), "the oldest 32-byte form must read, as the mixed lane");
+    assert_eq!(
+        (old.sample_rate, old.lane, fingerprint),
+        (48000, 0, None),
+        "the oldest 32-byte form must read, as the mixed lane"
+    );
 }
 
 #[test]
@@ -108,7 +144,12 @@ fn our_opus_format_matches_what_windows_sends() {
     // SenderLane.cs:606: 48000, 2, 16, 1, 4, 192000, Opus, frame size; lane Mixed; labFlags 0.
     let f = AudioFormat::opus_48k_stereo(960);
     let bytes = protocol::write_format_payload(&f, Some(&[0; 8]));
-    assert_eq!(hex_of(&bytes[..36]), hex_of(&hex("80BB0000 02000000 10000000 01000000 04000000 00EE0200 02000000 C0030000 00 00 0000")));
+    assert_eq!(
+        hex_of(&bytes[..36]),
+        hex_of(&hex(
+            "80BB0000 02000000 10000000 01000000 04000000 00EE0200 02000000 C0030000 00 00 0000"
+        ))
+    );
     assert_eq!(&bytes[44..], &[0, 0]);
 }
 
@@ -116,13 +157,18 @@ fn our_opus_format_matches_what_windows_sends() {
 fn heartbeat_bytes() {
     let beat = protocol::write_heartbeat_payload(HeartbeatKind::Pong, 0x0102030405060708);
     assert_eq!(hex_of(&beat), "010807060504030201");
-    assert_eq!(protocol::read_heartbeat_payload(&hex("00 0807060504030201")), Some((HeartbeatKind::Ping, 0x0102030405060708)));
+    assert_eq!(
+        protocol::read_heartbeat_payload(&hex("00 0807060504030201")),
+        Some((HeartbeatKind::Ping, 0x0102030405060708))
+    );
 }
 
 fn seal_by_hand(key: &[u8; 32], plain: &[u8]) -> Vec<u8> {
     let nonce = hex("0102030405060708090A0B0C");
     let mut cipher = plain.to_vec();
-    let tag = Aes256Gcm::new(key.into()).encrypt_in_place_detached(Nonce::from_slice(&nonce), &[], &mut cipher).unwrap();
+    let tag = Aes256Gcm::new(key.into())
+        .encrypt_in_place_detached(Nonce::from_slice(&nonce), &[], &mut cipher)
+        .unwrap();
     [nonce, tag.to_vec(), cipher].concat()
 }
 
@@ -132,7 +178,12 @@ fn open_by_hand(key: &[u8; 32], sealed: &[u8]) -> Option<Vec<u8>> {
     }
     let mut plain = sealed[28..].to_vec();
     Aes256Gcm::new(key.into())
-        .decrypt_in_place_detached(Nonce::from_slice(&sealed[..12]), &[], &mut plain, Tag::from_slice(&sealed[12..28]))
+        .decrypt_in_place_detached(
+            Nonce::from_slice(&sealed[..12]),
+            &[],
+            &mut plain,
+            Tag::from_slice(&sealed[12..28]),
+        )
         .ok()?;
     Some(plain)
 }
@@ -145,14 +196,26 @@ fn sealed_envelope_both_ways() {
 
     let ours = cipher.seal_random(&plain);
     assert_eq!(ours.len(), 12 + 16 + plain.len());
-    assert_eq!(open_by_hand(&key, &ours), Some(plain.clone()), "OUR ENVELOPE: nonce, then tag, then ciphertext");
+    assert_eq!(
+        open_by_hand(&key, &ours),
+        Some(plain.clone()),
+        "OUR ENVELOPE: nonce, then tag, then ciphertext"
+    );
 
     let theirs = seal_by_hand(&key, &plain);
-    assert_eq!(cipher.open(&theirs), Some(plain.clone()), "THEIR ENVELOPE must open");
+    assert_eq!(
+        cipher.open(&theirs),
+        Some(plain.clone()),
+        "THEIR ENVELOPE must open"
+    );
 
     let mut nonces = NonceSequence::new();
     let audio = cipher.seal_next(&mut nonces, &plain);
-    assert_eq!(open_by_hand(&key, &audio), Some(plain), "OUR AUDIO: the counter-nonce path uses the same layout");
+    assert_eq!(
+        open_by_hand(&key, &audio),
+        Some(plain),
+        "OUR AUDIO: the counter-nonce path uses the same layout"
+    );
 }
 
 #[test]
@@ -163,12 +226,21 @@ fn tick_proof_bytes_both_ways() {
     const WHEN: i64 = 1_790_000_000;
     let tick_plain = hex("01 803BB16A00000000 00112233445566778899AABBCCDDEEFF");
 
-    assert_eq!(open_by_hand(&key, &tickproof::seal(&cipher, id, WHEN)), Some(tick_plain.clone()),
-        "OUR TICK PROOF: version 1, time little-endian, id big-endian");
-    let proof = tickproof::unseal(&cipher, &seal_by_hand(&key, &tick_plain)).expect("THEIR TICK PROOF must open");
+    assert_eq!(
+        open_by_hand(&key, &tickproof::seal(&cipher, id, WHEN)),
+        Some(tick_plain.clone()),
+        "OUR TICK PROOF: version 1, time little-endian, id big-endian"
+    );
+    let proof = tickproof::unseal(&cipher, &seal_by_hand(&key, &tick_plain))
+        .expect("THEIR TICK PROOF must open");
     assert_eq!((proof.instance, proof.unix_secs), (id, WHEN));
 
-    let packet = protocol::packet(PacketType::TickProof, protocol::CONTROL_STREAM_ID, 1, &tickproof::seal(&cipher, id, WHEN));
+    let packet = protocol::packet(
+        PacketType::TickProof,
+        protocol::CONTROL_STREAM_ID,
+        1,
+        &tickproof::seal(&cipher, id, WHEN),
+    );
     assert_eq!(packet.len(), 12 + 53);
     assert_eq!(&packet[6..8], &[0xFF, 0xFF]);
 }
@@ -195,5 +267,8 @@ fn discovery_announcement_exact() {
     );
     let theirs = b"{\"InstanceId\":\"66666666-7777-8888-9999-000000000000\",\"Name\":\"iPhone\",\"AudioPort\":47830,\"CanSend\":true,\"CanReceive\":true}";
     let heard = discovery::parse_announcement(theirs, "192.168.1.8".parse().unwrap(), id).unwrap();
-    assert_eq!(format!("{}@{}", heard.name, heard.audio_port), "iPhone@47830");
+    assert_eq!(
+        format!("{}@{}", heard.name, heard.audio_port),
+        "iPhone@47830"
+    );
 }
