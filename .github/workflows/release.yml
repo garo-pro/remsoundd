@@ -1,0 +1,38 @@
+name: Release
+
+# Push a tag such as v0.1.0 to build the Debian package and publish it as a GitHub release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: never
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    container: rust:1-bookworm
+    steps:
+      - uses: actions/checkout@v7
+      - name: The tag must match the version in Cargo.toml
+        run: |
+          version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match Cargo.toml version $version" >&2
+            exit 1
+          fi
+      - name: Install build dependencies
+        run: apt-get update -qq && apt-get install -y -qq cmake pkg-config libopus-dev
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb
+      - run: cargo test --locked
+      - run: cargo deb --locked
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: target/debian/*.deb
+          generate_release_notes: true

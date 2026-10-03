@@ -7,9 +7,9 @@
 # reach a bridge client running as the gateway user, and nobody else may connect.
 set -euo pipefail
 
-CLIENT=/usr/share/doc/remsoundd/examples/bridge_client.py
+CLIENT=/usr/share/remsoundd/bridge_client.py
 WORK=$(mktemp -d /var/tmp/remsoundd-smoke.XXXXXX)
-chmod 755 "$WORK"
+chmod 1777 "$WORK"  # the gateway user writes its recording here
 PIDS=()
 
 say() { printf '\n== %s\n' "$*"; }

@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  lint:
+    name: Format and Clippy
+    runs-on: ubuntu-24.04
+    container: rust:1-bookworm
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install build dependencies
+        run: apt-get update -qq && apt-get install -y -qq cmake pkg-config libopus-dev
+      - run: rustup component add rustfmt clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+
+  test:
+    name: Test on ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Debian 12, stable Rust
+            image: rust:1-bookworm
+          - name: Debian 13, stable Rust
+            image: rust:1-trixie
+          - name: Debian 12, Rust 1.89 (minimum)
+            image: rust:1.89-bookworm
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install build dependencies
+        run: apt-get update -qq && apt-get install -y -qq cmake pkg-config libopus-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.image }}
+      - run: cargo test --locked
+
+  package:
+    name: Build the Debian package
+    runs-on: ubuntu-24.04
+    # Built on the oldest supported release so the package's libc requirement fits them all.
+    container: rust:1-bookworm
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install build dependencies
+        run: apt-get update -qq && apt-get install -y -qq cmake pkg-config libopus-dev
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb
+      - run: cargo deb --locked
+      - uses: actions/upload-artifact@v7
+        with:
+          name: remsoundd-deb
+          path: target/debian/*.deb
+          if-no-files-found: error
+
+  install:
+    name: Install and run on ${{ matrix.image }}
+    needs: package
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [debian:bookworm, debian:trixie, ubuntu:22.04, ubuntu:24.04]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: remsoundd-deb
+          path: pkg
+      - name: Install the package
+        run: apt-get update -qq && apt-get install -y -qq ./pkg/*.deb python3
+      - name: Smoke test (daemon run directly, as its own user)
+        run: bash ci/smoke-test.sh
+
+  install-systemd:
+    name: Install and run under systemd (Ubuntu 24.04)
+    needs: package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: remsoundd-deb
+          path: pkg
+      - name: Install the package
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ./pkg/*.deb
+      - name: Smoke test (the real hardened systemd service)
+        run: sudo bash ci/smoke-test.sh

@@ -1,5 +1,7 @@
 # remsoundd
 
+[![CI](https://github.com/garo-pro/remsoundd/actions/workflows/ci.yml/badge.svg)](https://github.com/garo-pro/remsoundd/actions/workflows/ci.yml)
+
 remsoundd is a small Linux daemon that speaks the RemSound protocol. It is a full-duplex, headless peer for the Windows RemSound app.
 
 Its first job is to carry audio for a Hermes Agent gateway plugin:
@@ -20,10 +22,17 @@ It runs as a systemd service, starts at boot, and needs no sound card on the Lin
 - Reading the logs
 - Troubleshooting
 - More documentation
+- License
 
 ## Building and installing
 
-You need a Rust toolchain, a C compiler, CMake and the Opus development files.
+Ready-made packages for amd64 are attached to each release on GitHub. They install on Debian 12 and 13 and on Ubuntu 22.04 and 24.04, which CI tests on every change:
+
+```sh
+sudo apt install ./remsoundd_*_amd64.deb
+```
+
+To build it yourself, you need Rust 1.89 or newer, a C compiler, CMake and the Opus development files. Debian's own Rust packages are older than that, so install Rust with rustup.
 
 ```sh
 sudo apt install build-essential cmake pkg-config libopus-dev
@@ -126,11 +135,11 @@ sudo remsoundd record mic.wav --seconds 10
 
 ### The test client
 
-`tools/bridge_client.py` talks to a running daemon's bridge socket, exactly as the plugin would. The package installs it under `/usr/share/doc/remsoundd/examples`. It prints peer events and writes the microphone audio to a WAV file. It can also play a WAV file to the PC as speech:
+`tools/bridge_client.py` talks to a running daemon's bridge socket, exactly as the plugin would. The package installs it as `/usr/share/remsoundd/bridge_client.py`. It prints peer events and writes the microphone audio to a WAV file. It can also play a WAV file to the PC as speech:
 
 ```sh
-python3 tools/bridge_client.py --out mic.wav --seconds 20
-python3 tools/bridge_client.py --play hello.wav --cue listening
+python3 /usr/share/remsoundd/bridge_client.py --out mic.wav --seconds 20
+python3 /usr/share/remsoundd/bridge_client.py --play hello.wav --cue listening
 ```
 
 Run it as a user in the `remsound` group.
@@ -202,3 +211,9 @@ Run `sudo remsoundd check` for a plain explanation. If the journal says it canno
 
 - `docs/BRIDGE.md`: the bridge socket contract, shared with the Hermes plugin.
 - `docs/PROTOCOL.md`: the RemSound wire protocol as verified against the RemSound sources, with citations.
+
+## License
+
+remsoundd is released under the MIT License; see `LICENSE`.
+
+It is a clean-room implementation of the RemSound protocol, written for Linux. RemSound itself, by Ednunp, is also MIT-licensed: https://github.com/Ednunp/RemSound. The known-answer test vectors in `tests/known_answers.rs` come from RemSound's own self-tests, so the far end can be checked byte for byte.
