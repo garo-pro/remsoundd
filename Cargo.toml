@@ -1,0 +1,62 @@
+[package]
+name = "remsoundd"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "A headless RemSound peer for Linux: streams audio to and from the Windows RemSound app"
+license = "MIT"
+readme = "README.md"
+
+[dependencies]
+aes-gcm = "0.10"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+hmac = "0.12"
+hound = "3"
+if-addrs = "0.13"
+opus = "0.3"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+rand = "0.8"
+rubato = "0.16"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+socket2 = { version = "0.5", features = ["all"] }
+subtle = "2"
+tokio = { version = "1", features = ["full"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["user", "fs"] }
+sd-notify = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+strip = true
+
+[package.metadata.deb]
+maintainer = "garo <games.garos.mail@gmail.com>"
+section = "sound"
+priority = "optional"
+depends = "$auto, adduser"
+extended-description = """\
+remsoundd speaks the RemSound protocol as a full-duplex, headless peer. \
+It receives a Windows PC's microphone and hands it to a local client over a \
+Unix socket, and streams that client's audio back to the PC."""
+maintainer-scripts = "debian/"
+assets = [
+    ["target/release/remsoundd", "usr/bin/", "755"],
+    ["systemd/remsoundd.service", "lib/systemd/system/", "644"],
+    ["config.example.toml", "etc/remsoundd/config.toml", "644"],
+    ["README.md", "usr/share/doc/remsoundd/README.md", "644"],
+    ["docs/BRIDGE.md", "usr/share/doc/remsoundd/BRIDGE.md", "644"],
+    ["docs/PROTOCOL.md", "usr/share/doc/remsoundd/PROTOCOL.md", "644"],
+    ["tools/bridge_client.py", "usr/share/doc/remsoundd/examples/bridge_client.py", "644"],
+]
+conf-files = ["/etc/remsoundd/config.toml"]
