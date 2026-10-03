@@ -12,7 +12,7 @@ aes-gcm = "0.10"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 hound = "3"
-if-addrs = "0.13"
+if-addrs = "0.15"
 opus = "0.3"
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 rand = "0.8"
