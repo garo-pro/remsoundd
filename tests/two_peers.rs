@@ -69,9 +69,13 @@ async fn collect_mic(h: &mut EngineHandle, for_how_long: Duration) -> (Vec<f32>,
     let _ = timeout(for_how_long, async {
         while let Some(e) = h.events.recv().await {
             match e {
-                Event::Mic { samples, .. } => {
-                    mono.extend(samples.chunks_exact(2).map(|lr| (lr[0] + lr[1]) / 2.0))
-                }
+                Event::Mic { samples, .. } => mono.extend(
+                    samples
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|[l, r]| (l + r) / 2.0),
+                ),
                 Event::PlaybackDone { id } => done.push(id),
                 _ => {}
             }

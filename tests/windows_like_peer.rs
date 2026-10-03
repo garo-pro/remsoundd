@@ -240,7 +240,13 @@ async fn talks_to_a_windows_like_peer() {
     let _ = timeout(Duration::from_millis(600), async {
         while let Some(e) = daemon.events.recv().await {
             if let Event::Mic { samples, .. } = e {
-                mono.extend(samples.chunks_exact(2).map(|lr| (lr[0] + lr[1]) / 2.0));
+                mono.extend(
+                    samples
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|[l, r]| (l + r) / 2.0),
+                );
             }
         }
     })

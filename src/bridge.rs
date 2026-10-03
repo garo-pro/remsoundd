@@ -223,7 +223,7 @@ pub async fn run(
                         for chunk in mic.push(&samples) {
                             if c.tx.try_send(frame(msg::MIC, &chunk)).is_err() {
                                 mic_dropped += 1;
-                                if mic_dropped == 1 || mic_dropped % 500 == 0 {
+                                if mic_dropped == 1 || mic_dropped.is_multiple_of(500) {
                                     warn!("the bridge client is not reading fast enough; {mic_dropped} microphone chunks dropped so far");
                                 }
                             }
@@ -327,12 +327,14 @@ fn handle_client_frame(
             })
         }
         msg::TTS_PCM => {
-            if payload.len() % 2 != 0 {
+            if !payload.len().is_multiple_of(2) {
                 return Err("TTS_PCM must hold whole 16-bit samples".into());
             }
             let samples = payload
-                .chunks_exact(2)
-                .map(|b| i16::from_le_bytes([b[0], b[1]]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|b| i16::from_le_bytes(*b))
                 .collect();
             send(Command::TtsPcm(samples))
         }

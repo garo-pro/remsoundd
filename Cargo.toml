@@ -2,7 +2,7 @@
 name = "remsoundd"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.89"
 description = "A headless RemSound peer for Linux: streams audio to and from the Windows RemSound app"
 license = "MIT"
 readme = "README.md"
@@ -58,6 +58,6 @@ assets = [
     ["README.md", "usr/share/doc/remsoundd/README.md", "644"],
     ["docs/BRIDGE.md", "usr/share/doc/remsoundd/BRIDGE.md", "644"],
     ["docs/PROTOCOL.md", "usr/share/doc/remsoundd/PROTOCOL.md", "644"],
-    ["tools/bridge_client.py", "usr/share/doc/remsoundd/examples/bridge_client.py", "644"],
+    ["tools/bridge_client.py", "usr/share/remsoundd/bridge_client.py", "755"],
 ]
 conf-files = ["/etc/remsoundd/config.toml"]

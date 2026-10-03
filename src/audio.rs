@@ -19,8 +19,10 @@ pub fn f32_to_i16(sample: f32) -> i16 {
 /// Interleaved stereo to mono, averaging left and right.
 pub fn stereo_to_mono(stereo: &[f32]) -> Vec<f32> {
     stereo
-        .chunks_exact(2)
-        .map(|lr| (lr[0] + lr[1]) * 0.5)
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|[l, r]| (l + r) * 0.5)
         .collect()
 }
 

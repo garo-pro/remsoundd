@@ -161,10 +161,12 @@ async fn tts_from_one_daemon_arrives_as_mic_at_the_other() {
         loop {
             let (k, p) = cb.next().await;
             if k == msg::MIC {
-                assert_eq!(p.len() % 2, 0);
+                assert!(p.len().is_multiple_of(2));
                 mono.extend(
-                    p.chunks_exact(2)
-                        .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0),
+                    p.as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|b| i16::from_le_bytes(*b) as f32 / 32768.0),
                 );
             }
         }

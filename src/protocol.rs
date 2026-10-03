@@ -366,8 +366,8 @@ pub mod pcm {
 
     pub fn int24le_to_float(bytes: &[u8], out: &mut Vec<f32>) {
         out.reserve(bytes.len() / 3);
-        for chunk in bytes.chunks_exact(3) {
-            let packed = (chunk[0] as i32) | ((chunk[1] as i32) << 8) | ((chunk[2] as i32) << 16);
+        for [lo, mid, hi] in bytes.as_chunks::<3>().0 {
+            let packed = (*lo as i32) | ((*mid as i32) << 8) | ((*hi as i32) << 16);
             out.push(((packed << 8) >> 8) as f32 / 8_388_607.0);
         }
     }
