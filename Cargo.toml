@@ -8,18 +8,18 @@ license = "MIT"
 readme = "README.md"
 
 [dependencies]
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 hound = "3"
 if-addrs = "0.13"
 opus = "0.3"
-pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
 rand = "0.8"
 rubato = "0.16"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 socket2 = { version = "0.5", features = ["all"] }
 subtle = "2"
 tokio = { version = "1", features = ["full"] }
