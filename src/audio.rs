@@ -3,7 +3,9 @@
 //! Inside the daemon, audio is interleaved `f32` at 48 kHz stereo: what RemSound puts on the
 //! wire. The bridge converts at its edge: mic audio to 16 kHz mono s16le, TTS from any rate.
 
-use rubato::{FftFixedIn, Resampler};
+use rubato::audioadapter_buffers::direct::InterleavedSlice;
+use rubato::audioadapter_buffers::owned::InterleavedOwned;
+use rubato::{Fft, FixedSync, Resampler};
 
 pub const WIRE_RATE: u32 = 48_000;
 pub const WIRE_CHANNELS: usize = 2;
@@ -40,8 +42,9 @@ pub fn to_stereo(samples: &[f32], channels: usize) -> Vec<f32> {
 /// tail that the input length implies.
 pub struct StreamResampler {
     channels: usize,
-    inner: Option<FftFixedIn<f32>>,
-    pending: Vec<Vec<f32>>,
+    inner: Option<Fft<f32>>,
+    /// Interleaved input waiting for a whole chunk.
+    pending: Vec<f32>,
     skip: usize,
     in_frames: u64,
     out_frames: u64,
@@ -61,19 +64,19 @@ impl StreamResampler {
         } else {
             // About 10 ms chunks: small enough to keep latency low, big enough to be efficient.
             let chunk = (in_rate as usize / 100).max(64);
-            Some(FftFixedIn::<f32>::new(
+            Some(Fft::<f32>::new(
                 in_rate as usize,
                 out_rate as usize,
                 chunk,
-                1,
                 channels,
+                FixedSync::Input,
             )?)
         };
         let skip = inner.as_ref().map(|r| r.output_delay()).unwrap_or(0);
         Ok(Self {
             channels,
             inner,
-            pending: vec![Vec::new(); channels],
+            pending: Vec::new(),
             skip,
             in_frames: 0,
             out_frames: 0,
@@ -90,49 +93,46 @@ impl StreamResampler {
         (self.in_frames * self.out_rate as u64 + self.in_rate as u64 / 2) / self.in_rate as u64
     }
 
-    fn emit(&mut self, planar: Vec<Vec<f32>>, out: &mut Vec<f32>, limit: Option<u64>) {
-        let frames = planar.first().map(Vec::len).unwrap_or(0);
-        for i in 0..frames {
+    /// Run one whole chunk from the front of `pending` and append the output, delay removed.
+    fn run_chunk(&mut self, inner: &mut Fft<f32>, out: &mut Vec<f32>, limit: Option<u64>) -> bool {
+        let need = inner.input_frames_next();
+        let ch = self.channels;
+        let Ok(input) = InterleavedSlice::new(&self.pending[..need * ch], ch, need) else {
+            return false;
+        };
+        let mut output = InterleavedOwned::new(0.0f32, ch, inner.output_frames_max());
+        let Ok((_, produced)) = inner.process_into_buffer(&input, &mut output, None) else {
+            return false;
+        };
+        self.pending.drain(..need * ch);
+        let data = output.take_data();
+        for frame in data[..produced * ch].chunks_exact(ch) {
             if self.skip > 0 {
                 self.skip -= 1;
                 continue;
             }
             if limit.is_some_and(|l| self.out_frames >= l) {
-                return;
+                break;
             }
-            for ch in &planar {
-                out.push(ch[i]);
-            }
+            out.extend_from_slice(frame);
             self.out_frames += 1;
         }
+        true
     }
 
     /// Feed interleaved samples; returns whatever output is ready, interleaved.
     pub fn process(&mut self, interleaved: &[f32]) -> Vec<f32> {
-        self.in_frames += (interleaved.len() / self.channels) as u64;
+        let usable = interleaved.len() / self.channels * self.channels;
+        self.in_frames += (usable / self.channels) as u64;
         let Some(mut inner) = self.inner.take() else {
             self.out_frames = self.in_frames;
-            return interleaved[..interleaved.len() / self.channels * self.channels].to_vec();
+            return interleaved[..usable].to_vec();
         };
-        for frame in interleaved.chunks_exact(self.channels) {
-            for (ch, &s) in frame.iter().enumerate() {
-                self.pending[ch].push(s);
-            }
-        }
+        self.pending.extend_from_slice(&interleaved[..usable]);
         let mut out = Vec::new();
-        loop {
-            let need = inner.input_frames_next();
-            if self.pending[0].len() < need {
+        while self.pending.len() >= inner.input_frames_next() * self.channels {
+            if !self.run_chunk(&mut inner, &mut out, None) {
                 break;
-            }
-            let chunk: Vec<Vec<f32>> = self
-                .pending
-                .iter_mut()
-                .map(|p| p.drain(..need).collect())
-                .collect();
-            match inner.process(&chunk, None) {
-                Ok(planar) => self.emit(planar, &mut out, None),
-                Err(_) => break,
             }
         }
         self.inner = Some(inner);
@@ -149,18 +149,15 @@ impl StreamResampler {
         let mut rounds = 0;
         while self.out_frames < expected && rounds < 64 {
             rounds += 1;
-            let partial: Vec<Vec<f32>> =
-                std::mem::replace(&mut self.pending, vec![Vec::new(); self.channels]);
-            let planar = if partial[0].is_empty() {
-                inner.process_partial::<Vec<f32>>(None, None)
-            } else {
-                inner.process_partial(Some(&partial), None)
-            };
-            match planar {
-                Ok(p) => self.emit(p, &mut out, Some(expected)),
-                Err(_) => break,
+            let whole = inner.input_frames_next() * self.channels;
+            if self.pending.len() < whole {
+                self.pending.resize(whole, 0.0);
+            }
+            if !self.run_chunk(&mut inner, &mut out, Some(expected)) {
+                break;
             }
         }
+        self.pending.clear();
         self.inner = Some(inner);
         out
     }

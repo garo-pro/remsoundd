@@ -6,8 +6,8 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use aes_gcm::aead::{AeadInPlace, KeyInit};
-use aes_gcm::{Aes256Gcm, Nonce, Tag};
+use aes_gcm::aead::{AeadInOut, KeyInit, Nonce, Tag};
+use aes_gcm::Aes256Gcm;
 use remsoundd::config::{PeerSpec, SendMode};
 use remsoundd::crypto::Credentials;
 use remsoundd::engine::{self, EngineConfig, Event};
@@ -28,20 +28,26 @@ fn seal(key: &[u8; 32], counter: u64, plain: &[u8]) -> Vec<u8> {
     let mut nonce = [0xA5u8; 12];
     nonce[6..].copy_from_slice(&counter.to_le_bytes()[..6]);
     let mut body = plain.to_vec();
-    let tag = Aes256Gcm::new(key.into())
-        .encrypt_in_place_detached(Nonce::from_slice(&nonce), &[], &mut body)
+    let tag = Aes256Gcm::new_from_slice(key)
+        .unwrap()
+        .encrypt_inout_detached(
+            &Nonce::<Aes256Gcm>::try_from(&nonce[..]).unwrap(),
+            &[],
+            body.as_mut_slice().into(),
+        )
         .unwrap();
     [nonce.to_vec(), tag.to_vec(), body].concat()
 }
 
 fn open(key: &[u8; 32], sealed: &[u8]) -> Option<Vec<u8>> {
     let mut body = sealed.get(28..)?.to_vec();
-    Aes256Gcm::new(key.into())
-        .decrypt_in_place_detached(
-            Nonce::from_slice(&sealed[..12]),
+    Aes256Gcm::new_from_slice(key)
+        .unwrap()
+        .decrypt_inout_detached(
+            &Nonce::<Aes256Gcm>::try_from(&sealed[..12]).unwrap(),
             &[],
-            &mut body,
-            Tag::from_slice(&sealed[12..28]),
+            body.as_mut_slice().into(),
+            &Tag::<Aes256Gcm>::try_from(&sealed[12..28]).unwrap(),
         )
         .ok()?;
     Some(body)

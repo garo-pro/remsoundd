@@ -1,0 +1,22 @@
+# Third-party licenses
+
+remsoundd is released under the MIT License. Its binary also contains the code listed here.
+
+libopus 1.6.1, built from source by the opusic-sys crate, is covered by the BSD 3-Clause license in `libopus-COPYING`, installed next to this file.
+
+The Rust crates are grouped by license below.
+
+{{#each licenses}}
+## {{{name}}}
+
+Used by:
+
+{{#each used_by}}
+- {{crate.name}} {{crate.version}}
+{{/each}}
+
+```text
+{{{text}}}
+```
+
+{{/each}}

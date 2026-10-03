@@ -4,9 +4,8 @@
 //! iteration count derives a different key from the same password, and the far end hears
 //! nothing at all rather than an error.
 
-use aes_gcm::aead::{AeadInPlace, KeyInit};
-use aes_gcm::{Aes256Gcm, Nonce, Tag};
-use rand::RngCore;
+use aes_gcm::aead::{AeadInOut, KeyInit, Nonce, Tag};
+use aes_gcm::Aes256Gcm;
 
 pub const KEY_BYTES: usize = 32;
 pub const FINGERPRINT_BYTES: usize = 8;
@@ -84,7 +83,7 @@ pub struct Cipher {
 impl Cipher {
     pub fn new(key: &Key) -> Self {
         Self {
-            aead: Aes256Gcm::new(key.into()),
+            aead: Aes256Gcm::new_from_slice(key).expect("a 32-byte key"),
         }
     }
 
@@ -97,7 +96,7 @@ impl Cipher {
         let (head, body) = out.split_at_mut(OVERHEAD_BYTES);
         let tag = self
             .aead
-            .encrypt_in_place_detached(Nonce::from_slice(nonce), &[], body)
+            .encrypt_inout_detached(&Nonce::<Aes256Gcm>::from(*nonce), &[], body.into())
             .expect("AES-GCM encryption cannot fail for in-range lengths");
         head[NONCE_BYTES..].copy_from_slice(&tag);
         out
@@ -106,7 +105,7 @@ impl Cipher {
     /// Seal with a fresh random nonce, as tick proofs and control commands do.
     pub fn seal_random(&self, plaintext: &[u8]) -> Vec<u8> {
         let mut nonce = [0u8; NONCE_BYTES];
-        rand::thread_rng().fill_bytes(&mut nonce);
+        rand::fill(&mut nonce);
         self.seal_with_nonce(&nonce, plaintext)
     }
 
@@ -121,11 +120,11 @@ impl Cipher {
         if sealed.len() < OVERHEAD_BYTES {
             return None;
         }
-        let nonce = Nonce::from_slice(&sealed[..NONCE_BYTES]);
-        let tag = Tag::from_slice(&sealed[NONCE_BYTES..OVERHEAD_BYTES]);
+        let nonce = Nonce::<Aes256Gcm>::try_from(&sealed[..NONCE_BYTES]).ok()?;
+        let tag = Tag::<Aes256Gcm>::try_from(&sealed[NONCE_BYTES..OVERHEAD_BYTES]).ok()?;
         let mut plain = sealed[OVERHEAD_BYTES..].to_vec();
         self.aead
-            .decrypt_in_place_detached(nonce, &[], &mut plain, tag)
+            .decrypt_inout_detached(&nonce, &[], plain.as_mut_slice().into(), &tag)
             .ok()?;
         Some(plain)
     }
@@ -142,7 +141,7 @@ pub struct NonceSequence {
 impl NonceSequence {
     pub fn new() -> Self {
         let mut prefix = [0u8; 6];
-        rand::thread_rng().fill_bytes(&mut prefix);
+        rand::fill(&mut prefix);
         Self { prefix, counter: 0 }
     }
 

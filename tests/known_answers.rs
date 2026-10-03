@@ -4,8 +4,8 @@
 //! If one of these fails, do not change the bytes to match. Every other RemSound already in the
 //! wild speaks these values, and a mismatch fails silently on the far end.
 
-use aes_gcm::aead::{AeadInPlace, KeyInit};
-use aes_gcm::{Aes256Gcm, Nonce, Tag};
+use aes_gcm::aead::{AeadInOut, KeyInit, Nonce, Tag};
+use aes_gcm::Aes256Gcm;
 use remsoundd::crypto::{self, Cipher, NonceSequence};
 use remsoundd::protocol::{self, pcm, AudioFormat, Codec, HeartbeatKind, PacketType};
 use remsoundd::{discovery, tickproof};
@@ -166,8 +166,13 @@ fn heartbeat_bytes() {
 fn seal_by_hand(key: &[u8; 32], plain: &[u8]) -> Vec<u8> {
     let nonce = hex("0102030405060708090A0B0C");
     let mut cipher = plain.to_vec();
-    let tag = Aes256Gcm::new(key.into())
-        .encrypt_in_place_detached(Nonce::from_slice(&nonce), &[], &mut cipher)
+    let tag = Aes256Gcm::new_from_slice(key)
+        .unwrap()
+        .encrypt_inout_detached(
+            &Nonce::<Aes256Gcm>::try_from(&nonce[..]).unwrap(),
+            &[],
+            cipher.as_mut_slice().into(),
+        )
         .unwrap();
     [nonce, tag.to_vec(), cipher].concat()
 }
@@ -177,12 +182,13 @@ fn open_by_hand(key: &[u8; 32], sealed: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
     let mut plain = sealed[28..].to_vec();
-    Aes256Gcm::new(key.into())
-        .decrypt_in_place_detached(
-            Nonce::from_slice(&sealed[..12]),
+    Aes256Gcm::new_from_slice(key)
+        .unwrap()
+        .decrypt_inout_detached(
+            &Nonce::<Aes256Gcm>::try_from(&sealed[..12]).unwrap(),
             &[],
-            &mut plain,
-            Tag::from_slice(&sealed[12..28]),
+            plain.as_mut_slice().into(),
+            &Tag::<Aes256Gcm>::try_from(&sealed[12..28]).unwrap(),
         )
         .ok()?;
     Some(plain)

@@ -32,17 +32,19 @@ Ready-made packages for amd64 are attached to each release on GitHub. They insta
 sudo apt install ./remsoundd_*_amd64.deb
 ```
 
-To build it yourself, you need Rust 1.89 or newer, a C compiler, CMake and the Opus development files. Debian's own Rust packages are older than that, so install Rust with rustup.
+To build it yourself, you need Rust 1.89 or newer, a C compiler and CMake. libopus is built from source and linked in, so the package needs no Opus library at run time. Debian's own Rust packages are older than Rust 1.89, so install Rust with rustup.
 
 ```sh
-sudo apt install build-essential cmake pkg-config libopus-dev
+sudo apt install build-essential cmake
 curl https://sh.rustup.rs -sSf | sh
 ```
 
-Build and install a Debian package:
+Build and install a Debian package. The package carries the licenses of everything compiled into it, which `cargo about` collects first:
 
 ```sh
 cargo install cargo-deb
+cargo install cargo-about --locked --features cli
+cargo about generate about.hbs -o target/THIRD-PARTY-LICENSES.md
 cargo deb
 sudo apt install ./target/debian/remsoundd_*.deb
 ```
@@ -217,3 +219,5 @@ Run `sudo remsoundd check` for a plain explanation. If the journal says it canno
 remsoundd is released under the MIT License; see `LICENSE`.
 
 It is a clean-room implementation of the RemSound protocol, written for Linux. RemSound itself, by Ednunp, is also MIT-licensed: https://github.com/Ednunp/RemSound. The known-answer test vectors in `tests/known_answers.rs` come from RemSound's own self-tests, so the far end can be checked byte for byte.
+
+The binary includes libopus, under the BSD 3-Clause license in `licenses/libopus-COPYING`, and a number of Rust crates under MIT, Apache 2.0, BSD and Unicode licenses. The package installs both notices in `/usr/share/doc/remsoundd`.
