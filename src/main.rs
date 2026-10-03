@@ -195,12 +195,12 @@ async fn shutdown_signal() {
 
 fn notify_ready() {
     #[cfg(unix)]
-    let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Ready]);
+    let _ = sd_notify::notify(&[sd_notify::NotifyState::Ready]);
 }
 
 fn notify_stopping() {
     #[cfg(unix)]
-    let _ = sd_notify::notify(false, &[sd_notify::NotifyState::Stopping]);
+    let _ = sd_notify::notify(&[sd_notify::NotifyState::Stopping]);
 }
 
 #[cfg(unix)]

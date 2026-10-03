@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
-use rand::Rng;
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
@@ -255,7 +254,7 @@ struct Engine {
 }
 
 fn new_stream_id() -> u16 {
-    rand::thread_rng().gen_range(1..u16::MAX)
+    rand::random_range(1..u16::MAX)
 }
 
 fn unix_now() -> i64 {
