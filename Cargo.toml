@@ -2,7 +2,7 @@
 name = "remsoundd"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.82"
 description = "A headless RemSound peer for Linux: streams audio to and from the Windows RemSound app"
 license = "MIT"
 readme = "README.md"

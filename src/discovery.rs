@@ -87,7 +87,7 @@ pub struct HeardPeer {
 }
 
 /// What discovery has heard lately, shared with the rest of the daemon (for peer names).
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct PeerTable {
     peers: HashMap<(Uuid, IpAddr), HeardPeer>,
 }
