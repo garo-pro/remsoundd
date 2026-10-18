@@ -223,11 +223,19 @@ mod tests {
     fn nobody_talking_falls_back_to_the_first_sending_peer() {
         let mut sel = MicSelector::new(SelectParams::default());
         let mut t = Instant::now();
-        assert_eq!(sel.select(&ORDER, t), None, "nobody sends, nothing to choose");
+        assert_eq!(
+            sel.select(&ORDER, t),
+            None,
+            "nobody sends, nothing to choose"
+        );
         let got = run(&mut sel, &mut t, 10, &[(PC, None), (PHONE, None)]);
         assert!(got.iter().all(|c| *c == Some(PC)), "as in single mode");
         let got = run(&mut sel, &mut t, 60, &[(PHONE, None)]);
-        assert_eq!(got[0], Some(PC), "the PC counts as sending for a second more");
+        assert_eq!(
+            got[0],
+            Some(PC),
+            "the PC counts as sending for a second more"
+        );
         assert_eq!(got.last(), Some(&Some(PHONE)), "then only the phone sends");
     }
 
@@ -238,7 +246,11 @@ mod tests {
         run(&mut sel, &mut t, 50, &[(PC, None), (PHONE, Some(-70.0))]);
         assert_eq!(sel.current(), Some(PC));
         let got = run(&mut sel, &mut t, 1, &[(PC, None), (PHONE, Some(-25.0))]);
-        assert_eq!(got, [Some(PHONE)], "the first voiced chunk switches at once");
+        assert_eq!(
+            got,
+            [Some(PHONE)],
+            "the first voiced chunk switches at once"
+        );
         // Back to room noise: the phone keeps the microphone, during the hold and after it.
         let got = run(&mut sel, &mut t, 200, &[(PC, None), (PHONE, Some(-70.0))]);
         assert!(got.iter().all(|c| *c == Some(PHONE)));
@@ -252,11 +264,19 @@ mod tests {
         run(&mut sel, &mut t, 5, &[(PC, Some(-30.0)), (PHONE, None)]);
         assert_eq!(sel.current(), Some(PC));
         // The phone gets louder while the PC is still talking, and through a short pause.
-        let got = run(&mut sel, &mut t, 25, &[(PC, Some(-30.0)), (PHONE, Some(-15.0))]);
+        let got = run(
+            &mut sel,
+            &mut t,
+            25,
+            &[(PC, Some(-30.0)), (PHONE, Some(-15.0))],
+        );
         assert!(got.iter().all(|c| *c == Some(PC)));
         let pause = (params.hold.as_millis() / 20) as usize - 5;
         let got = run(&mut sel, &mut t, pause, &[(PC, None), (PHONE, Some(-15.0))]);
-        assert!(got.iter().all(|c| *c == Some(PC)), "a pause shorter than the hold");
+        assert!(
+            got.iter().all(|c| *c == Some(PC)),
+            "a pause shorter than the hold"
+        );
         // Quiet for longer than the hold: the phone takes over.
         let got = run(&mut sel, &mut t, 10, &[(PC, None), (PHONE, Some(-15.0))]);
         assert_eq!(got.last(), Some(&Some(PHONE)));
@@ -266,10 +286,20 @@ mod tests {
     fn the_loudest_wins_when_two_start_together() {
         let mut sel = MicSelector::new(SelectParams::default());
         let mut t = Instant::now();
-        let got = run(&mut sel, &mut t, 1, &[(PC, Some(-35.0)), (PHONE, Some(-20.0))]);
+        let got = run(
+            &mut sel,
+            &mut t,
+            1,
+            &[(PC, Some(-35.0)), (PHONE, Some(-20.0))],
+        );
         assert_eq!(got, [Some(PHONE)]);
         let mut sel = MicSelector::new(SelectParams::default());
-        let got = run(&mut sel, &mut t, 1, &[(PC, Some(-20.0)), (PHONE, Some(-20.0))]);
+        let got = run(
+            &mut sel,
+            &mut t,
+            1,
+            &[(PC, Some(-20.0)), (PHONE, Some(-20.0))],
+        );
         assert_eq!(got, [Some(PC)], "a tie goes to the earlier peer");
     }
 
@@ -280,9 +310,23 @@ mod tests {
         // A PC with an open microphone next to a fan, above the threshold, never pausing.
         run(&mut sel, &mut t, 1, &[(PC, Some(-40.0))]);
         assert_eq!(sel.current(), Some(PC));
-        run(&mut sel, &mut t, 500, &[(PC, Some(-40.0)), (PHONE, Some(-70.0))]);
-        let got = run(&mut sel, &mut t, 1, &[(PC, Some(-40.0)), (PHONE, Some(-28.0))]);
-        assert_eq!(got, [Some(PHONE)], "after 10 s the hum no longer holds the microphone");
+        run(
+            &mut sel,
+            &mut t,
+            500,
+            &[(PC, Some(-40.0)), (PHONE, Some(-70.0))],
+        );
+        let got = run(
+            &mut sel,
+            &mut t,
+            1,
+            &[(PC, Some(-40.0)), (PHONE, Some(-28.0))],
+        );
+        assert_eq!(
+            got,
+            [Some(PHONE)],
+            "after 10 s the hum no longer holds the microphone"
+        );
     }
 
     #[test]
