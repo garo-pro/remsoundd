@@ -15,7 +15,19 @@
 peers = ["100.64.0.5"]
 
 # Whose microphone goes to the bridge. Defaults to the first peer above that is sending audio.
+# When set, this peer is always used and mic_mode below is ignored.
 # mic_from = "100.64.0.5"
+
+# How the microphone is chosen when mic_from is not set.
+# "single": the first peer above that is sending audio, even if it only sends silence.
+# "active": every sending peer is listened to, and the one that is talking goes to the bridge.
+#   It keeps the microphone until it has been quiet for mic_hold_ms, so a sentence is never cut
+#   in half. Peers sending silence or a steady hum never take it over.
+# mic_mode = "single"
+# With "active": below this level, in dBFS, a peer is not talking.
+# mic_threshold_db = -50.0
+# With "active": how long the talking peer keeps the microphone after its last word.
+# mic_hold_ms = 1500
 
 # audio_port = 47830
 # discovery_port = 47821

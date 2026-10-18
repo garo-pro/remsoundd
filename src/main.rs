@@ -139,6 +139,8 @@ async fn start_link(config: &Config) -> anyhow::Result<Link> {
         credentials,
         peers,
         mic_from: config.mic_from.clone(),
+        mic_mode: config.mic_mode,
+        mic_select: config.mic_select(),
         bind: SocketAddr::from((Ipv4Addr::UNSPECIFIED, config.audio_port)),
         send_mode: config.send.mode,
         bitrate: config.send.bitrate,

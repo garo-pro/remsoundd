@@ -3,9 +3,10 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use remsoundd::config::{PeerSpec, SendMode};
+use remsoundd::config::{MicMode, PeerSpec, SendMode};
 use remsoundd::crypto::Credentials;
 use remsoundd::engine::{self, Command, EngineConfig, EngineHandle, Event};
+use remsoundd::micselect::SelectParams;
 use tokio::time::timeout;
 use uuid::Uuid;
 
@@ -24,6 +25,8 @@ fn config(port: u16, peer_port: u16, credentials: &Credentials, mode: SendMode) 
         credentials: credentials.clone(),
         peers: vec![PeerSpec::parse(&format!("127.0.0.1:{peer_port}"), 47830).unwrap()],
         mic_from: None,
+        mic_mode: MicMode::Single,
+        mic_select: SelectParams::default(),
         bind: SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
         send_mode: mode,
         bitrate: 64_000,

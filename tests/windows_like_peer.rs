@@ -8,9 +8,10 @@ use std::time::Duration;
 
 use aes_gcm::aead::{AeadInOut, KeyInit, Nonce, Tag};
 use aes_gcm::Aes256Gcm;
-use remsoundd::config::{PeerSpec, SendMode};
+use remsoundd::config::{MicMode, PeerSpec, SendMode};
 use remsoundd::crypto::Credentials;
 use remsoundd::engine::{self, EngineConfig, Event};
+use remsoundd::micselect::SelectParams;
 use tokio::net::UdpSocket;
 use tokio::time::{timeout, Instant};
 use uuid::Uuid;
@@ -86,6 +87,8 @@ async fn talks_to_a_windows_like_peer() {
         credentials: creds.clone(),
         peers: vec![PeerSpec::parse(&format!("127.0.0.1:{pc_port}"), 47830).unwrap()],
         mic_from: None,
+        mic_mode: MicMode::Single,
+        mic_select: SelectParams::default(),
         bind: daemon_addr,
         send_mode: SendMode::Continuous,
         bitrate: 96_000,

@@ -16,9 +16,10 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::audio::Cue;
-use crate::config::{PeerSpec, SendMode};
+use crate::config::{MicMode, PeerSpec, SendMode};
 use crate::crypto::{fingerprints_equal, Cipher, Credentials, NonceSequence};
 use crate::discovery::SharedPeerTable;
+use crate::micselect::{MicSelector, SelectParams};
 use crate::player::Player;
 use crate::protocol::{self, AudioFormat, HeartbeatKind, PacketType, CONTROL_STREAM_ID};
 use crate::session::ReceiveSession;
@@ -48,6 +49,10 @@ pub struct EngineConfig {
     pub credentials: Credentials,
     pub peers: Vec<PeerSpec>,
     pub mic_from: Option<String>,
+    /// How the microphone is chosen when `mic_from` is not set.
+    pub mic_mode: MicMode,
+    /// Who counts as talking in [`MicMode::Active`].
+    pub mic_select: SelectParams,
     pub bind: SocketAddr,
     pub send_mode: SendMode,
     pub bitrate: i32,
@@ -247,6 +252,7 @@ struct Engine {
     guard: tickproof::Guard,
     proof_seen: HashMap<IpAddr, Instant>,
     events: mpsc::Sender<Event>,
+    mic: MicSelector,
     throttle: Throttle,
     counters: Counters,
     resolved_tx: mpsc::UnboundedSender<(usize, Option<SocketAddr>)>,
@@ -316,6 +322,7 @@ impl Engine {
             guard: tickproof::Guard::default(),
             proof_seen: HashMap::new(),
             events,
+            mic: MicSelector::new(config.mic_select),
             throttle: Throttle::default(),
             counters: Counters::default(),
             resolved_tx,
@@ -921,8 +928,8 @@ impl Engine {
 
     // ---- microphone -------------------------------------------------------------------------------
 
-    /// The peer whose microphone goes to the bridge: `mic_from` if set, else the first peer in
-    /// config order that is sending audio.
+    /// The peer whose microphone goes to the bridge in single mode, and always when `mic_from` is
+    /// set: `mic_from` if set, else the first peer in config order that is sending audio.
     fn mic_source(&self, now: Instant) -> Option<IpAddr> {
         if let Some(wanted) = self.config.mic_from.as_deref() {
             let wanted = wanted.trim();
@@ -945,6 +952,10 @@ impl Engine {
 
     fn on_poll_tick(&mut self) {
         let now = Instant::now();
+        if self.config.mic_from.is_none() && self.config.mic_mode == MicMode::Active {
+            self.poll_active_mic(now);
+            return;
+        }
         let source = self.mic_source(now);
         let mut mic = Vec::new();
         for ((ep, _), session) in self.sessions.iter_mut() {
@@ -955,6 +966,32 @@ impl Engine {
         }
         for (from, samples) in mic {
             self.emit(Event::Mic { from, samples });
+        }
+    }
+
+    /// `mic_mode = "active"`: every sending peer is listened to, and only the one that is
+    /// talking goes to the bridge (see [`crate::micselect`]).
+    fn poll_active_mic(&mut self, now: Instant) {
+        let mut polled = Vec::new();
+        for ((ep, _), session) in self.sessions.iter_mut() {
+            let samples = session.poll(now);
+            if !samples.is_empty() {
+                self.mic.observe(ep.ip(), &samples, now);
+                polled.push((ep.ip(), samples));
+            }
+        }
+        let order: Vec<IpAddr> = self.peers.iter().filter_map(Peer::ip).collect();
+        let before = self.mic.current();
+        let source = self.mic.select(&order, now);
+        if source != before {
+            if let Some(ip) = source {
+                debug!("the microphone now comes from {}", self.who(ip));
+            }
+        }
+        for (from, samples) in polled {
+            if Some(from) == source {
+                self.emit(Event::Mic { from, samples });
+            }
         }
     }
 

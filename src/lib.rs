@@ -12,6 +12,7 @@ pub mod discovery;
 pub mod engine;
 pub mod identity;
 pub mod jitter;
+pub mod micselect;
 pub mod player;
 pub mod protocol;
 pub mod session;

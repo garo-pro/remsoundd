@@ -6,6 +6,7 @@ use std::time::Duration;
 use anyhow::{bail, Context};
 use serde::Deserialize;
 
+use crate::micselect::{SelectParams, DEFAULT_HOLD, DEFAULT_THRESHOLD_DB};
 use crate::protocol::{DEFAULT_AUDIO_PORT, DEFAULT_DISCOVERY_PORT};
 
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/remsoundd/config.toml";
@@ -21,6 +22,16 @@ pub enum SendMode {
     Burst,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MicMode {
+    /// One peer's microphone: the first peer in `peers` that is sending audio.
+    #[default]
+    Single,
+    /// Every sending peer is listened to; the one that is talking goes to the bridge.
+    Active,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -34,6 +45,16 @@ pub struct Config {
     pub peers: Vec<String>,
     /// Which peer's microphone goes to the bridge. Defaults to the first connected peer in `peers`.
     pub mic_from: Option<String>,
+    /// How the microphone is chosen when `mic_from` is not set.
+    #[serde(default)]
+    pub mic_mode: MicMode,
+    /// With `mic_mode = "active"`: below this level, in dBFS, a peer is not talking.
+    #[serde(default = "default_mic_threshold_db")]
+    pub mic_threshold_db: f32,
+    /// With `mic_mode = "active"`: how long the talking peer keeps the microphone after its
+    /// last word, in milliseconds.
+    #[serde(default = "default_mic_hold_ms")]
+    pub mic_hold_ms: u64,
     #[serde(default = "default_audio_port")]
     pub audio_port: u16,
     #[serde(default = "default_discovery_port")]
@@ -86,6 +107,12 @@ fn default_audio_port() -> u16 {
 }
 fn default_discovery_port() -> u16 {
     DEFAULT_DISCOVERY_PORT
+}
+fn default_mic_threshold_db() -> f32 {
+    DEFAULT_THRESHOLD_DB
+}
+fn default_mic_hold_ms() -> u64 {
+    DEFAULT_HOLD.as_millis() as u64
 }
 fn yes() -> bool {
     true
@@ -197,6 +224,18 @@ impl Config {
                 self.receive.jitter_ms
             );
         }
+        if !(-100.0..=0.0).contains(&self.mic_threshold_db) {
+            bail!(
+                "mic_threshold_db {} must be between -100 and 0",
+                self.mic_threshold_db
+            );
+        }
+        if !(100..=10_000).contains(&self.mic_hold_ms) {
+            bail!(
+                "mic_hold_ms {} must be between 100 and 10000",
+                self.mic_hold_ms
+            );
+        }
         self.peer_specs()?;
         Ok(())
     }
@@ -217,6 +256,14 @@ impl Config {
 
     pub fn jitter(&self) -> Duration {
         Duration::from_millis(self.receive.jitter_ms)
+    }
+
+    /// How `mic_mode = "active"` tells who is talking.
+    pub fn mic_select(&self) -> SelectParams {
+        SelectParams {
+            threshold_db: self.mic_threshold_db,
+            hold: Duration::from_millis(self.mic_hold_ms),
+        }
     }
 
     /// The password, and a plain-words description of where it came from (never the password itself).
@@ -287,6 +334,41 @@ mod tests {
         assert_eq!(c.discovery_port, 47821);
         assert_eq!(c.send.mode, SendMode::Continuous);
         assert_eq!(c.bridge.socket, PathBuf::from("/run/remsoundd/bridge.sock"));
+    }
+
+    #[test]
+    fn the_microphone_defaults_to_single_mode() {
+        let c: Config = toml::from_str(r#"password = "x""#).unwrap();
+        assert_eq!(c.mic_from, None);
+        assert_eq!(c.mic_mode, MicMode::Single);
+        assert_eq!(c.mic_select(), SelectParams::default());
+    }
+
+    #[test]
+    fn active_microphone_mode_parses() {
+        let c: Config = toml::from_str(
+            r#"
+            password = "x"
+            mic_mode = "active"
+            mic_threshold_db = -45.0
+            mic_hold_ms = 2000
+            "#,
+        )
+        .unwrap();
+        c.validate().unwrap();
+        assert_eq!(c.mic_mode, MicMode::Active);
+        assert_eq!(
+            c.mic_select(),
+            SelectParams {
+                threshold_db: -45.0,
+                hold: Duration::from_secs(2),
+            }
+        );
+        assert!(toml::from_str::<Config>("mic_mode = 'mix'").is_err());
+        let c: Config = toml::from_str("password = 'x'\nmic_threshold_db = 3.0").unwrap();
+        assert!(c.validate().is_err());
+        let c: Config = toml::from_str("password = 'x'\nmic_hold_ms = 0").unwrap();
+        assert!(c.validate().is_err());
     }
 
     #[test]

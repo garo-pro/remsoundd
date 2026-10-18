@@ -45,6 +45,8 @@ Raw 16 kHz mono s16le microphone audio from the selected peer, in 20 ms chunks o
 
 The selected peer is `mic_from` in the config, or else the first peer in `peers` that is sending audio.
 
+With `mic_mode = "active"` (and no `mic_from`), every sending peer is listened to and the selected peer is the one that is talking: the first to rise above `mic_threshold_db` (default -50 dBFS) and its own noise floor, the loudest if several start together. It stays selected until it has been quiet for `mic_hold_ms` (default 1500), so an utterance is never split between microphones. While nobody talks, the stream stays with the last talker, or else falls back to the first sending peer in `peers`. Peers are switched, not mixed: the stream is always one peer's microphone, so the frame format and timing above do not change. The client cannot tell which peer a frame came from; a switch can be seen only as a step in the audio. The default, `mic_mode = "single"`, is the behaviour described in the paragraph above.
+
 ### 0x04 PLAYBACK_DONE
 
 ```json
